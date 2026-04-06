@@ -21,7 +21,7 @@ function toneForRun(status: WorkflowRunSummary['status'] | 'never'): 'good' | 'w
     return 'good';
   }
 
-  if (status === 'queued' || status === 'running' || status === 'waiting-approval' || status === 'never') {
+  if (status === 'queued' || status === 'running' || status === 'waiting-approval' || status === 'canceling' || status === 'never') {
     return 'warn';
   }
 

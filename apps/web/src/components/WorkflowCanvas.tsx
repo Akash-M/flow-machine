@@ -37,6 +37,8 @@ function nodeStatusLabel(status: WorkflowStepState | 'queued' | null): string | 
       return 'Approval';
     case 'failed':
       return 'Failed';
+    case 'canceled':
+      return 'Stopped';
     case 'success':
       return 'Done';
     case 'queued':
@@ -63,6 +65,10 @@ function nodeStatusClassName(status: WorkflowStepState | 'queued' | null): strin
   }
 
   if (status === 'failed') {
+    return ' workflow-node--failed';
+  }
+
+  if (status === 'canceled') {
     return ' workflow-node--failed';
   }
 

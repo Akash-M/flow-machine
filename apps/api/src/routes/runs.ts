@@ -91,6 +91,17 @@ export async function registerRunRoutes(server: FastifyInstance, runManager: Wor
     }
   });
 
+  server.post('/api/runs/:id/stop', async (request, reply) => {
+    try {
+      const run = await runManager.stopRun((request.params as { id: string }).id);
+      return { run };
+    } catch (error) {
+      return reply.code(400).send({
+        message: error instanceof Error ? error.message : 'Could not stop workflow run.'
+      });
+    }
+  });
+
   server.post('/api/runs/:id/rerun', async (request, reply) => {
     try {
       const run = await runManager.rerun((request.params as { id: string }).id);

@@ -148,10 +148,61 @@ function mergeRunContext(current: WorkflowRunContext, update?: Partial<WorkflowR
   };
 }
 
+class RunCancellationError extends Error {
+  constructor(message = 'Run stopped by user.') {
+    super(message);
+    this.name = 'RunCancellationError';
+  }
+}
+
+function cancellationMessage(signal: AbortSignal): string {
+  if (signal.reason instanceof Error && signal.reason.message) {
+    return signal.reason.message;
+  }
+
+  if (typeof signal.reason === 'string' && signal.reason.trim().length > 0) {
+    return signal.reason;
+  }
+
+  return 'Run stopped by user.';
+}
+
+function isCancellationError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'RunCancellationError');
+}
+
+function cancelStep(step: WorkflowStepRun, finishedAt: string, message: string): WorkflowStepRun {
+  return {
+    ...step,
+    state: 'canceled',
+    finishedAt,
+    durationMs: step.startedAt ? Date.parse(finishedAt) - Date.parse(step.startedAt) : null,
+    errorMessage: message,
+    approval:
+      step.approval.state === 'pending'
+        ? {
+            ...step.approval,
+            state: 'rejected'
+          }
+        : step.approval,
+    logs: [
+      ...step.logs,
+      {
+        id: buildLogEntryId(step, step.logs.length),
+        at: finishedAt,
+        level: 'warn',
+        message
+      }
+    ]
+  };
+}
+
 export class WorkflowRunManager {
   private readonly events = new EventEmitter();
 
   private readonly activeRuns = new Set<string>();
+
+  private readonly abortControllers = new Map<string, AbortController>();
 
   constructor(
     private readonly store: WorkflowStore,
@@ -352,17 +403,82 @@ export class WorkflowRunManager {
     );
   }
 
+  async stopRun(runId: string): Promise<WorkflowRun> {
+    const run = this.store.getRun(runId);
+
+    if (!run) {
+      throw new Error('Run not found.');
+    }
+
+    if (run.status === 'success' || run.status === 'failed' || run.status === 'canceled') {
+      throw new Error('Only queued, running, canceling, or waiting approval runs can be stopped.');
+    }
+
+    const message = 'Run stopped by user.';
+    const currentStep = run.currentNodeId ? run.steps.find((entry) => entry.nodeId === run.currentNodeId) ?? null : null;
+    const controller = this.abortControllers.get(runId);
+
+    if (!controller || run.status === 'queued' || run.status === 'waiting-approval') {
+      return this.persistCanceledRun(run, message, currentStep);
+    }
+
+    if (run.status === 'canceling') {
+      return run;
+    }
+
+    const requestedAt = new Date().toISOString();
+    const nextRun = this.persistRun(
+      currentStep
+        ? withUpdatedStep(
+            {
+              ...run,
+              status: 'canceling',
+              errorMessage: message,
+              finishedAt: null
+            },
+            {
+              ...currentStep,
+              logs: [
+                ...currentStep.logs,
+                {
+                  id: buildLogEntryId(currentStep, currentStep.logs.length),
+                  at: requestedAt,
+                  level: 'warn',
+                  message: 'Stop requested. Waiting for the current step to halt.'
+                }
+              ]
+            }
+          )
+        : {
+            ...run,
+            status: 'canceling',
+            errorMessage: message,
+            finishedAt: null
+          }
+    );
+
+    controller.abort(new RunCancellationError(message));
+    return nextRun;
+  }
+
   private async executeRun(runId: string): Promise<void> {
     if (this.activeRuns.has(runId)) {
       return;
     }
 
     this.activeRuns.add(runId);
+    const abortController = new AbortController();
+    this.abortControllers.set(runId, abortController);
 
     try {
       let run = this.store.getRun(runId);
 
-      if (!run || run.status === 'waiting-approval' || run.status === 'failed' || run.status === 'success') {
+      if (!run || run.status === 'waiting-approval' || run.status === 'failed' || run.status === 'success' || run.status === 'canceled') {
+        return;
+      }
+
+      if (run.status === 'canceling') {
+        this.persistCanceledRun(run, cancellationMessage(abortController.signal));
         return;
       }
 
@@ -387,6 +503,19 @@ export class WorkflowRunManager {
       }
 
       while (run.pendingNodeIds.length > 0) {
+        const persistedRun = this.store.getRun(runId);
+
+        if (!persistedRun) {
+          return;
+        }
+
+        run = persistedRun;
+
+        if (abortController.signal.aborted || run.status === 'canceling') {
+          this.persistCanceledRun(run, cancellationMessage(abortController.signal));
+          return;
+        }
+
         const nodeId = run.pendingNodeIds[0];
         const node = findNode(workflow, nodeId);
 
@@ -446,6 +575,7 @@ export class WorkflowRunManager {
         const stepLogs = [...step.logs];
         const stepNetwork = [...step.network];
         const startedAt = step.startedAt ?? new Date().toISOString();
+        let runningStepSnapshot: WorkflowStepRun | null = null;
         const log = (level: WorkflowStepLogEntry['level'], message: string, data?: unknown) => {
           stepLogs.push({
             id: buildLogEntryId(step, stepLogs.length),
@@ -454,6 +584,26 @@ export class WorkflowRunManager {
             message,
             data
           });
+
+          if (runningStepSnapshot && run) {
+            const currentRun = run;
+            run = this.persistRun(
+              withUpdatedStep(
+                {
+                  ...currentRun,
+                  status: currentRun.status === 'canceling' ? 'canceling' : 'running',
+                  currentNodeId: node.id,
+                  finishedAt: null,
+                  errorMessage: currentRun.status === 'canceling' ? currentRun.errorMessage : null
+                },
+                {
+                  ...runningStepSnapshot,
+                  logs: [...stepLogs],
+                  network: [...stepNetwork]
+                }
+              )
+            );
+          }
         };
 
         const runningStep: WorkflowStepRun = {
@@ -468,6 +618,7 @@ export class WorkflowRunManager {
               }
             : step.approval
         };
+        runningStepSnapshot = runningStep;
 
         run = this.persistRun(
           withUpdatedStep(
@@ -489,6 +640,7 @@ export class WorkflowRunManager {
             node,
             repository: run.context.repository,
             secretStore: this.secretStore,
+            signal: abortController.signal,
             task,
             workflow,
             workflowStore: this.store,
@@ -506,6 +658,20 @@ export class WorkflowRunManager {
             network: [...stepNetwork, ...(result.network ?? [])]
           };
           const runWithSuccessfulStep = withUpdatedStep(run, successfulStep);
+
+          if (abortController.signal.aborted || this.store.getRun(runId)?.status === 'canceling') {
+            this.persistRun({
+              ...runWithSuccessfulStep,
+              context: mergeRunContext(run.context, result.context),
+              status: 'canceled',
+              currentNodeId: null,
+              pendingNodeIds: [],
+              finishedAt,
+              errorMessage: cancellationMessage(abortController.signal)
+            });
+            return;
+          }
+
           const nextNodeIds = resolveNextNodeIds(workflow, runWithSuccessfulStep, successfulStep);
 
           run = this.persistRun({
@@ -516,6 +682,37 @@ export class WorkflowRunManager {
           });
         } catch (error) {
           const finishedAt = new Date().toISOString();
+          const latestRun = this.store.getRun(runId) ?? run;
+
+          if (abortController.signal.aborted || latestRun.status === 'canceling' || isCancellationError(error)) {
+            const message = cancellationMessage(abortController.signal);
+            const canceledStep = cancelStep(
+              {
+                ...runningStep,
+                logs: [...stepLogs],
+                network: stepNetwork
+              },
+              finishedAt,
+              message
+            );
+
+            this.persistRun(
+              withUpdatedStep(
+                {
+                  ...latestRun,
+                  status: 'canceled',
+                  currentNodeId: node.id,
+                  pendingNodeIds: [],
+                  finishedAt,
+                  errorMessage: message
+                },
+                canceledStep
+              )
+            );
+
+            return;
+          }
+
           const message = error instanceof Error ? error.message : 'Unknown workflow execution failure.';
           const failedStep: WorkflowStepRun = {
             ...runningStep,
@@ -553,6 +750,13 @@ export class WorkflowRunManager {
         }
       }
 
+      const latestRun = this.store.getRun(runId) ?? run;
+
+      if (abortController.signal.aborted || latestRun.status === 'canceling') {
+        this.persistCanceledRun(latestRun, cancellationMessage(abortController.signal));
+        return;
+      }
+
       this.persistRun({
         ...run,
         status: 'success',
@@ -561,8 +765,38 @@ export class WorkflowRunManager {
         errorMessage: null
       });
     } finally {
+      this.abortControllers.delete(runId);
       this.activeRuns.delete(runId);
     }
+  }
+
+  private persistCanceledRun(run: WorkflowRun, message: string, stepOverride?: WorkflowStepRun | null): WorkflowRun {
+    const finishedAt = new Date().toISOString();
+    const step = stepOverride ?? (run.currentNodeId ? run.steps.find((entry) => entry.nodeId === run.currentNodeId) ?? null : null);
+
+    if (step && step.state !== 'success' && step.state !== 'failed' && step.state !== 'skipped' && step.state !== 'canceled') {
+      return this.persistRun(
+        withUpdatedStep(
+          {
+            ...run,
+            status: 'canceled',
+            currentNodeId: step.nodeId,
+            pendingNodeIds: [],
+            finishedAt,
+            errorMessage: message
+          },
+          cancelStep(step, finishedAt, message)
+        )
+      );
+    }
+
+    return this.persistRun({
+      ...run,
+      status: 'canceled',
+      pendingNodeIds: [],
+      finishedAt,
+      errorMessage: message
+    });
   }
 
   private failRun(run: WorkflowRun, message: string): WorkflowRun {

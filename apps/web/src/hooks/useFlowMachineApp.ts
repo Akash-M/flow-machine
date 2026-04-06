@@ -301,6 +301,7 @@ export interface RunsViewModel {
   handleResumeSelectedRun: () => void;
   handleRerunSelectedRun: () => void;
   handleStartSelectedWorkflowRun: () => void;
+  handleStopSelectedRun: () => void;
 }
 
 export interface ApprovalsViewModel {
@@ -454,6 +455,7 @@ export interface WorkflowStudioModel {
   handleSelectWorkflow: (workflowId: string) => void;
   handleStartSelectedWorkflowRun: () => void;
   handleStartNodeChange: (nodeId: string) => void;
+  handleStopRun: (runId: string) => void;
   handleStudioViewChange: (view: StudioView) => void;
   handleWorkflowFieldChange: (field: 'name' | 'description', value: string) => void;
   handleWorkflowTagsChange: (value: string) => void;
@@ -890,6 +892,28 @@ export function useFlowMachineApp(): FlowMachineAppModel {
     }
   });
 
+  const stopRunMutation = useMutation({
+    mutationFn: (runId: string) =>
+      requestJson<{ run: WorkflowRun }>(`/api/runs/${runId}/stop`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }),
+    onSuccess: async ({ run }) => {
+      setSelectedRunId(run.id);
+      setFeedback(run.status === 'canceling' ? `Stopping ${run.workflowName}.` : `Stopped ${run.workflowName}.`);
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['runs'] }),
+        queryClient.invalidateQueries({ queryKey: ['run', run.id] }),
+        queryClient.invalidateQueries({ queryKey: ['workflows'] }),
+        queryClient.invalidateQueries({ queryKey: ['approvals'] })
+      ]);
+    },
+    onError: (error) => {
+      setFeedback(error instanceof Error ? error.message : 'Could not stop workflow.');
+    }
+  });
+
   const resumeRunMutation = useMutation({
     mutationFn: (runId: string) =>
       requestJson<{ run: WorkflowRun }>(`/api/runs/${runId}/resume`, {
@@ -1170,7 +1194,7 @@ export function useFlowMachineApp(): FlowMachineAppModel {
   const latestWorkflowRun = workflowRuns[0] ?? null;
   const pendingWorkflowApprovalRun = workflowRuns.find((run) => run.status === 'waiting-approval') ?? null;
   const inFlightWorkflowRun =
-    workflowRuns.find((run) => run.status === 'running' || run.status === 'queued' || run.status === 'waiting-approval') ?? null;
+    workflowRuns.find((run) => run.status === 'running' || run.status === 'queued' || run.status === 'waiting-approval' || run.status === 'canceling') ?? null;
 
   useEffect(() => {
     if (routedWorkflowId) {
@@ -1353,6 +1377,15 @@ export function useFlowMachineApp(): FlowMachineAppModel {
         continue;
       }
 
+      if (run.status === 'canceled') {
+        pushNotification(
+          run.errorMessage ? `${run.workflowName} was stopped. ${run.errorMessage}` : `${run.workflowName} was stopped.`,
+          'warn',
+          `run-status:${run.id}:canceled`
+        );
+        continue;
+      }
+
       if (run.status === 'failed' && run.errorMessage !== 'Approval rejected.') {
         pushNotification(
           run.errorMessage ? `${run.workflowName} failed. ${run.errorMessage}` : `${run.workflowName} failed.`,
@@ -1370,8 +1403,8 @@ export function useFlowMachineApp(): FlowMachineAppModel {
   const approvalTaskCount = tasks.filter((task) => task.requiresApprovalByDefault).length;
   const networkTaskCount = tasks.filter((task) => task.capabilities.some((capability) => capability.startsWith('network:'))).length;
   const localOnlyTaskCount = tasks.filter((task) => task.capabilities.length === 0).length;
-  const activeRunCount = runs.filter((run) => run.status === 'queued' || run.status === 'running').length;
-  const completedRunCount = runs.filter((run) => run.status === 'success' || run.status === 'failed').length;
+  const activeRunCount = runs.filter((run) => run.status === 'queued' || run.status === 'running' || run.status === 'canceling').length;
+  const completedRunCount = runs.filter((run) => run.status === 'success' || run.status === 'failed' || run.status === 'canceled').length;
   const selectedRun = runDetailQuery.data ?? null;
   const activeWorkflowRun = selectedRun?.workflowId === selectedWorkflowId ? selectedRun : null;
   const selectedWorkflowName = editorWorkflow?.name || selectedWorkflowSummary?.name || 'No workflow selected';
@@ -2243,6 +2276,11 @@ export function useFlowMachineApp(): FlowMachineAppModel {
     resumeRunMutation.mutate(runId);
   }
 
+  function handleStopRun(runId: string): void {
+    handleFocusRun(runId);
+    stopRunMutation.mutate(runId);
+  }
+
   function handleApproveSelectedRun(): void {
     if (!selectedRunId) {
       return;
@@ -2273,6 +2311,14 @@ export function useFlowMachineApp(): FlowMachineAppModel {
     }
 
     handleResumeRun(selectedRunId);
+  }
+
+  function handleStopSelectedRun(): void {
+    if (!selectedRunId) {
+      return;
+    }
+
+    handleStopRun(selectedRunId);
   }
 
   function handleToggleAutoApproval(taskKey: string): void {
@@ -3316,7 +3362,7 @@ export function useFlowMachineApp(): FlowMachineAppModel {
           runDetailQuery.error instanceof Error ? runDetailQuery.error.message : runDetailQuery.isError ? 'Unknown error.' : null
       },
       isActionPending:
-        approveRunMutation.isPending || rejectRunMutation.isPending || rerunRunMutation.isPending || resumeRunMutation.isPending,
+        approveRunMutation.isPending || rejectRunMutation.isPending || rerunRunMutation.isPending || resumeRunMutation.isPending || stopRunMutation.isPending,
       isStartingRun: startRunMutation.isPending,
       runs,
       selectedRun,
@@ -3329,7 +3375,8 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       handleRejectSelectedRun,
       handleResumeSelectedRun,
       handleRerunSelectedRun,
-      handleStartSelectedWorkflowRun
+      handleStartSelectedWorkflowRun,
+      handleStopSelectedRun
     },
     approvals: {
       isSavingRules: updateApprovalRulesMutation.isPending,
@@ -3428,7 +3475,7 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       isApplyingWorkflowDraft: applyWorkflowDraftMutation.isPending,
       isGeneratingWorkflow,
       isRunActionPending:
-        approveRunMutation.isPending || rejectRunMutation.isPending || rerunRunMutation.isPending || resumeRunMutation.isPending,
+        approveRunMutation.isPending || rejectRunMutation.isPending || rerunRunMutation.isPending || resumeRunMutation.isPending || stopRunMutation.isPending,
       isRefiningWorkflow,
       isTaskOperationRunning,
       isWorkflowOperationRunning,
@@ -3493,6 +3540,7 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       handleSelectWorkflow,
       handleStartSelectedWorkflowRun,
       handleStartNodeChange,
+      handleStopRun,
       handleStudioViewChange,
       handleWorkflowFieldChange,
       handleWorkflowTagsChange

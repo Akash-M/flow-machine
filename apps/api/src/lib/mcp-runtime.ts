@@ -18,6 +18,7 @@ interface McpRuntimeContext {
   log: RuntimeLogger;
   node: WorkflowNode;
   secretStore: SecretStore;
+  signal: AbortSignal;
   timeoutMs: number;
   workflowStore: WorkflowStore;
 }
@@ -94,6 +95,24 @@ function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function abortMessage(signal: AbortSignal): string {
+  if (signal.reason instanceof Error && signal.reason.message) {
+    return signal.reason.message;
+  }
+
+  if (typeof signal.reason === 'string' && signal.reason.trim().length > 0) {
+    return signal.reason;
+  }
+
+  return 'Run stopped by user.';
+}
+
+function createAbortError(signal: AbortSignal): Error {
+  const error = new Error(abortMessage(signal));
+  error.name = 'AbortError';
+  return error;
+}
+
 function resolveSecretTokensInString(value: string, secretStore: SecretStore): string {
   return value.replace(/\{\{\s*secret:([A-Za-z0-9_.-]+)\s*\}\}/g, (_match, key: string) => {
     const secret = secretStore.getSecretValue(key);
@@ -159,19 +178,40 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError(signal));
+      return;
+    }
+
     const timer = setTimeout(() => {
+      cleanup();
       reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
     }, timeoutMs);
 
+    const cleanup = () => {
+      clearTimeout(timer);
+
+      if (signal) {
+        signal.removeEventListener('abort', handleAbort);
+      }
+    };
+
+    const handleAbort = () => {
+      cleanup();
+      reject(createAbortError(signal!));
+    };
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+
     operation
       .then((value) => {
-        clearTimeout(timer);
+        cleanup();
         resolve(value);
       })
       .catch((error) => {
-        clearTimeout(timer);
+        cleanup();
         reject(error);
       });
   });
@@ -331,7 +371,8 @@ function buildToolArguments(context: McpRuntimeContext, inlineTransport: boolean
 async function connectWithTransport(
   client: Client,
   connection: NormalizedMcpConnection,
-  timeoutMs: number
+  timeoutMs: number,
+  signal: AbortSignal
 ): Promise<{ stderrChunks: string[]; transport: SSEClientTransport | StdioClientTransport | StreamableHTTPClientTransport }> {
   if (connection.transport === 'stdio') {
     const transport = new StdioClientTransport({
@@ -350,7 +391,7 @@ async function connectWithTransport(
       });
     }
 
-    await withTimeout(client.connect(transport), timeoutMs, 'Connecting to MCP stdio server');
+    await withTimeout(client.connect(transport), timeoutMs, 'Connecting to MCP stdio server', signal);
 
     return {
       stderrChunks,
@@ -363,7 +404,7 @@ async function connectWithTransport(
       requestInit: connection.requestInit
     });
 
-    await withTimeout(client.connect(transport), timeoutMs, 'Connecting to MCP SSE server');
+    await withTimeout(client.connect(transport), timeoutMs, 'Connecting to MCP SSE server', signal);
 
     return {
       stderrChunks: [],
@@ -376,7 +417,7 @@ async function connectWithTransport(
     sessionId: connection.sessionId
   });
 
-  await withTimeout(client.connect(transport), timeoutMs, 'Connecting to MCP HTTP server');
+  await withTimeout(client.connect(transport), timeoutMs, 'Connecting to MCP HTTP server', signal);
 
   return {
     stderrChunks: [],
@@ -402,6 +443,11 @@ export async function executeMcpCall(context: McpRuntimeContext): Promise<McpExe
   let stderrChunks: string[] = [];
   let transport: SSEClientTransport | StdioClientTransport | StreamableHTTPClientTransport | null = null;
   let usedTransport = connection.transport;
+  const handleAbort = () => {
+    void Promise.allSettled([client.close(), transport?.close()]);
+  };
+
+  context.signal.addEventListener('abort', handleAbort, { once: true });
 
   try {
     context.log('info', 'Connecting to MCP server.', {
@@ -411,7 +457,7 @@ export async function executeMcpCall(context: McpRuntimeContext): Promise<McpExe
     });
 
     try {
-      const result = await connectWithTransport(client, connection, context.timeoutMs);
+      const result = await connectWithTransport(client, connection, context.timeoutMs, context.signal);
       stderrChunks = result.stderrChunks;
       transport = result.transport;
     } catch (error) {
@@ -434,7 +480,8 @@ export async function executeMcpCall(context: McpRuntimeContext): Promise<McpExe
           transport: 'sse',
           url: connection.url
         },
-        context.timeoutMs
+        context.timeoutMs,
+        context.signal
       );
 
       stderrChunks = fallbackResult.stderrChunks;
@@ -446,7 +493,7 @@ export async function executeMcpCall(context: McpRuntimeContext): Promise<McpExe
       transportErrors.push(stringifyError(error));
     };
 
-    const toolsResult = await withTimeout(client.listTools(), context.timeoutMs, 'Listing MCP tools');
+    const toolsResult = await withTimeout(client.listTools(), context.timeoutMs, 'Listing MCP tools', context.signal);
     const availableTools = toolsResult.tools.map((tool) => tool.name);
 
     if (!availableTools.includes(toolName)) {
@@ -467,7 +514,8 @@ export async function executeMcpCall(context: McpRuntimeContext): Promise<McpExe
             }
       ),
       context.timeoutMs,
-      `Calling MCP tool ${toolName}`
+      `Calling MCP tool ${toolName}`,
+      context.signal
     );
 
     const stderrOutput = stderrChunks.join('');
@@ -511,6 +559,7 @@ export async function executeMcpCall(context: McpRuntimeContext): Promise<McpExe
       }
     };
   } finally {
+    context.signal.removeEventListener('abort', handleAbort);
     await Promise.allSettled([client.close(), transport?.close()]);
   }
 }

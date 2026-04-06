@@ -9,6 +9,7 @@ import { Combobox } from '../Combobox';
 import { OperationActivityPanel } from '../OperationActivityPanel';
 import { PromptComposer } from '../PromptComposer';
 import { StatusPill } from '../StatusPill';
+import { WorkflowRunInspector } from '../WorkflowRunInspector';
 import { WorkflowCanvas } from '../WorkflowCanvas';
 import { WorkflowNodeInspector } from './WorkflowNodeInspector';
 
@@ -21,11 +22,15 @@ function toneForRun(status: WorkflowRunSummary['status']): 'good' | 'warn' | 'ba
     return 'good';
   }
 
-  if (status === 'queued' || status === 'running' || status === 'waiting-approval') {
+  if (status === 'queued' || status === 'running' || status === 'waiting-approval' || status === 'canceling') {
     return 'warn';
   }
 
   return 'bad';
+}
+
+function canStopRun(status: WorkflowRunSummary['status']): boolean {
+  return status === 'queued' || status === 'running' || status === 'waiting-approval' || status === 'canceling';
 }
 
 export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) {
@@ -39,7 +44,6 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
       editorWorkflow.definition.startNodeId
     : 'Unset';
   const updatedAtCopy = editorWorkflow ? new Date(editorWorkflow.updatedAt).toLocaleString() : null;
-  const focusedRunId = studio.activeRun?.id ?? studio.latestRun?.id ?? null;
   const waitingApprovalStep =
     studio.activeRun?.steps.find((step) => step.state === 'waiting-approval' || step.approval.state === 'pending') ?? null;
   const runningStep = studio.activeRun?.steps.find((step) => step.state === 'running') ?? null;
@@ -49,6 +53,7 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
     : null;
   const primaryWorkflowValidationIssue = studio.workflowValidationIssues[0] ?? null;
   const approvalTargetLabel = waitingApprovalStep?.nodeName ?? 'pending step';
+  const stoppableRun = studio.activeRun && canStopRun(studio.activeRun.status) ? studio.activeRun : null;
   const latestRunNodeName =
     studio.latestRun?.currentNodeId && editorWorkflow
       ? editorWorkflow.definition.nodes.find((node) => node.id === studio.latestRun?.currentNodeId)?.name ?? studio.latestRun.currentNodeId
@@ -186,6 +191,10 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
       : latestRunNodeName
         ? `Currently executing ${latestRunNodeName}. Follow progress directly on the canvas and recent activity below.`
         : 'Execution is in progress. Follow progress directly on the canvas and recent activity below.';
+  } else if (studio.latestRun?.status === 'canceling') {
+    executionTone = 'warn';
+    executionTitle = 'Stopping workflow';
+    executionCopy = 'Stop requested. Waiting for the current step to unwind before Flow Machine marks the run as stopped.';
   } else if (studio.latestRun?.status === 'queued') {
     executionTone = 'warn';
     executionTitle = 'Run queued';
@@ -200,6 +209,10 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
     executionTone = 'bad';
     executionTitle = 'Last run failed';
     executionCopy = failedStep?.errorMessage ?? studio.latestRun.errorMessage ?? 'Inspect the failure and resume or rerun from here.';
+  } else if (studio.latestRun?.status === 'canceled') {
+    executionTone = 'bad';
+    executionTitle = 'Last run stopped';
+    executionCopy = studio.latestRun.errorMessage ?? 'This run was stopped before the remaining nodes could finish.';
   }
 
   const workflowContent = studio.detailState.isLoading && !editorWorkflow ? (
@@ -386,6 +399,17 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
                       View run details
                     </button>
                   ) : null}
+
+                  {stoppableRun ? (
+                    <button
+                      className="button button--danger"
+                      disabled={studio.isRunActionPending || stoppableRun.status === 'canceling'}
+                      onClick={() => studio.handleStopRun(stoppableRun.id)}
+                      type="button"
+                    >
+                      {stoppableRun.status === 'canceling' ? 'Stopping...' : 'Stop run'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -491,6 +515,25 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
                 </div>
               ) : null}
             </div>
+
+            {studio.activeRun ? (
+              <section className="workflow-editor__live-panel workflow-editor__live-panel--inspector">
+                <div className="workflow-editor__live-panel-header">
+                  <div>
+                    <p className="metric-card__eyebrow">{stoppableRun ? 'Live execution' : 'Latest run detail'}</p>
+                    <h4>{stoppableRun ? 'Inspect the run without leaving the editor' : 'Review the latest result in place'}</h4>
+                    <p>
+                      {stoppableRun
+                        ? 'Follow every step, inspect current logs, and stop the run here if it is clearly stalled or no longer useful.'
+                        : 'Inspect full logs and usable outputs from the latest selected run directly beside the canvas.'}
+                    </p>
+                  </div>
+                  <StatusPill tone={toneForRun(studio.activeRun.status)}>{studio.activeRun.status}</StatusPill>
+                </div>
+
+                <WorkflowRunInspector onSelectNode={studio.handleSelectNode} run={studio.activeRun} />
+              </section>
+            ) : null}
 
             <div className="workflow-editor__toolbar">
               <div className="workflow-editor__toolbar-group">

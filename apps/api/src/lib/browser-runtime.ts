@@ -11,6 +11,7 @@ interface BrowserRuntimeContext {
   config: AppConfig;
   log: RuntimeLogger;
   node: WorkflowNode;
+  signal: AbortSignal;
   timeoutMs: number;
 }
 
@@ -38,6 +39,30 @@ function asNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function abortMessage(signal: AbortSignal): string {
+  if (signal.reason instanceof Error && signal.reason.message) {
+    return signal.reason.message;
+  }
+
+  if (typeof signal.reason === 'string' && signal.reason.trim().length > 0) {
+    return signal.reason;
+  }
+
+  return 'Run stopped by user.';
+}
+
+function createAbortError(signal: AbortSignal): Error {
+  const error = new Error(abortMessage(signal));
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw createAbortError(signal);
+  }
 }
 
 function truncateText(value: string, maxLength = 12_000): string {
@@ -271,6 +296,7 @@ export async function getBrowserRuntimeStatus(): Promise<BrowserRuntimeStatus> {
 }
 
 export async function executeBrowserAutomation(context: BrowserRuntimeContext): Promise<BrowserAutomationResult> {
+  throwIfAborted(context.signal);
   const playwright = loadPlaywright();
   const browserStatus = await getBrowserRuntimeStatus();
 
@@ -317,6 +343,11 @@ export async function executeBrowserAutomation(context: BrowserRuntimeContext): 
     headless: asBoolean(context.node.config.headless) ?? true,
     timeout: context.timeoutMs
   });
+  const handleAbort = () => {
+    void browser.close().catch(() => undefined);
+  };
+
+  context.signal.addEventListener('abort', handleAbort, { once: true });
 
   try {
     const browserContext = await browser.newContext({
@@ -356,6 +387,7 @@ export async function executeBrowserAutomation(context: BrowserRuntimeContext): 
       const page = await browserContext.newPage();
 
       const gotoUrl = async (rawUrl: string, waitUntil?: string, timeoutOverride?: number) => {
+        throwIfAborted(context.signal);
         const parsedUrl = assertBrowserUrlAllowed(context.config, rawUrl);
         await page.goto(parsedUrl.toString(), {
           timeout: timeoutOverride ?? context.timeoutMs,
@@ -369,6 +401,7 @@ export async function executeBrowserAutomation(context: BrowserRuntimeContext): 
       }
 
       for (const action of actions) {
+        throwIfAborted(context.signal);
         const actionType = normalizeActionType(asString(action.type) ?? '');
         const actionTimeout = asNumber(action.timeoutMs) ?? context.timeoutMs;
 
@@ -500,9 +533,12 @@ export async function executeBrowserAutomation(context: BrowserRuntimeContext): 
           default:
             throw new Error(`Unsupported browser automation action ${actionType || '(missing type)'}.`);
         }
+
+        throwIfAborted(context.signal);
       }
 
       if (asString(context.node.config.screenshotPath)) {
+        throwIfAborted(context.signal);
         const screenshotPath = await saveScreenshot(page, context.config.repoRoot, {
           fullPage: context.node.config.screenshotFullPage,
           path: context.node.config.screenshotPath,
@@ -518,6 +554,7 @@ export async function executeBrowserAutomation(context: BrowserRuntimeContext): 
       const html = asBoolean(context.node.config.captureHtml) === true ? truncateText(await page.content()) : null;
       const textSelector = asString(context.node.config.captureTextSelector);
       const text = textSelector ? await extractValue(page, { selector: textSelector }, context.timeoutMs) : null;
+      throwIfAborted(context.signal);
 
       context.log('info', 'Completed browser automation run.', {
         finalUrl,
@@ -540,9 +577,10 @@ export async function executeBrowserAutomation(context: BrowserRuntimeContext): 
         }
       };
     } finally {
-      await browserContext.close();
+      await browserContext.close().catch(() => undefined);
     }
   } finally {
-    await browser.close();
+    context.signal.removeEventListener('abort', handleAbort);
+    await browser.close().catch(() => undefined);
   }
 }

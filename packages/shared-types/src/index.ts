@@ -4,9 +4,9 @@ export type ServiceHealthState = 'online' | 'offline' | 'degraded';
 
 export type PreflightState = 'ready' | 'warning' | 'missing';
 
-export type RunState = 'never' | 'queued' | 'running' | 'waiting-approval' | 'success' | 'failed';
+export type RunState = 'never' | 'queued' | 'running' | 'canceling' | 'waiting-approval' | 'success' | 'failed' | 'canceled';
 
-export type WorkflowStepState = 'pending' | 'running' | 'waiting-approval' | 'success' | 'failed' | 'skipped';
+export type WorkflowStepState = 'pending' | 'running' | 'waiting-approval' | 'success' | 'failed' | 'skipped' | 'canceled';
 
 export type WorkflowLogLevel = 'info' | 'warn' | 'error';
 

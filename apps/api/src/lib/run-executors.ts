@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 
 import {
   ApprovalRules,
@@ -21,7 +20,6 @@ import { ensurePathInsideRoot, resolveRepositoryRuntimeRoot } from './repositori
 import { SecretStore } from './secret-store';
 import { WorkflowStore } from './workflow-store';
 
-const execFileAsync = promisify(execFile);
 const ignoredDirectories = new Set(['.git', '.flow-machine', '.yarn', 'dist', 'node_modules']);
 
 interface StepLogger {
@@ -34,6 +32,7 @@ export interface StepExecutionContext {
   node: WorkflowNode;
   repository: LocalRepository | null;
   secretStore: SecretStore;
+  signal: AbortSignal;
   task: TaskCatalogEntry | null;
   workflow: WorkflowDocument;
   workflowStore: WorkflowStore;
@@ -110,6 +109,34 @@ function toJsonIfPossible(text: string): unknown {
 
 function truncateText(value: string, maxLength = 12_000): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}\n...[truncated]`;
+}
+
+function abortMessage(signal: AbortSignal): string {
+  if (signal.reason instanceof Error && signal.reason.message) {
+    return signal.reason.message;
+  }
+
+  if (typeof signal.reason === 'string' && signal.reason.trim().length > 0) {
+    return signal.reason;
+  }
+
+  return 'Run stopped by user.';
+}
+
+function createAbortError(signal: AbortSignal): Error {
+  const error = new Error(abortMessage(signal));
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw createAbortError(signal);
+  }
+}
+
+function createExecutionSignal(signal: AbortSignal, timeoutMs: number): AbortSignal {
+  return AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
 }
 
 function resolvePathValue(source: unknown, expression: string): unknown {
@@ -191,9 +218,14 @@ function assertNetworkAllowed(config: AppConfig, rawUrl: string): URL {
 async function runProcess(
   command: string,
   args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs: number }
+  options: { cwd: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs: number }
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(createAbortError(options.signal));
+      return;
+    }
+
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
@@ -203,6 +235,34 @@ async function runProcess(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let killTimer: NodeJS.Timeout | null = null;
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+        killTimer = null;
+      }
+
+      if (options.signal) {
+        options.signal.removeEventListener('abort', handleAbort);
+      }
+    };
+
+    const handleAbort = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, 1_500);
+      reject(createAbortError(options.signal!));
+    };
 
     const timeout = setTimeout(() => {
       if (settled) {
@@ -210,9 +270,12 @@ async function runProcess(
       }
 
       settled = true;
+      cleanup();
       child.kill('SIGTERM');
       reject(new Error(`Command timed out after ${options.timeoutMs}ms.`));
     }, options.timeoutMs);
+
+    options.signal?.addEventListener('abort', handleAbort, { once: true });
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
@@ -228,7 +291,7 @@ async function runProcess(
       }
 
       settled = true;
-      clearTimeout(timeout);
+      cleanup();
       reject(error);
     });
 
@@ -238,7 +301,7 @@ async function runProcess(
       }
 
       settled = true;
-      clearTimeout(timeout);
+      cleanup();
 
       if (exitCode !== 0) {
         reject(new Error(stderr.trim() || `Command exited with code ${exitCode}.`));
@@ -254,10 +317,13 @@ async function runProcess(
   });
 }
 
-async function walkDirectory(rootPath: string, currentPath: string, collector: string[]): Promise<void> {
+async function walkDirectory(rootPath: string, currentPath: string, collector: string[], signal: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
   const entries = await fs.readdir(currentPath, { withFileTypes: true });
 
   for (const entry of entries) {
+    throwIfAborted(signal);
+
     if (ignoredDirectories.has(entry.name)) {
       continue;
     }
@@ -265,7 +331,7 @@ async function walkDirectory(rootPath: string, currentPath: string, collector: s
     const entryPath = path.join(currentPath, entry.name);
 
     if (entry.isDirectory()) {
-      await walkDirectory(rootPath, entryPath, collector);
+      await walkDirectory(rootPath, entryPath, collector, signal);
       continue;
     }
 
@@ -285,8 +351,15 @@ async function executeReadFile(context: StepExecutionContext): Promise<StepExecu
     throw new Error('Read File requires config.path.');
   }
 
+  context.log('info', 'Opening repository file for reading.', {
+    path: targetPath,
+    repository: context.repository?.hostPath ?? context.config.repoMountSource
+  });
+
+  throwIfAborted(context.signal);
   const resolvedPath = ensurePathInsideRoot(repositoryRoot, targetPath);
   const content = await fs.readFile(resolvedPath, 'utf8');
+  throwIfAborted(context.signal);
 
   context.log('info', 'Read file from repository.', { path: targetPath, repository: context.repository?.hostPath ?? context.config.repoMountSource });
 
@@ -306,11 +379,18 @@ async function executeWriteFile(context: StepExecutionContext): Promise<StepExec
     throw new Error('Write File requires config.path.');
   }
 
+  context.log('info', 'Preparing to write a repository file.', {
+    path: targetPath,
+    repository: context.repository?.hostPath ?? context.config.repoMountSource
+  });
+
+  throwIfAborted(context.signal);
   const resolvedPath = ensurePathInsideRoot(repositoryRoot, targetPath);
   const content = asString(context.node.config.content) ?? JSON.stringify(context.input, null, 2);
 
   await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
   await fs.writeFile(resolvedPath, content, 'utf8');
+  throwIfAborted(context.signal);
 
   context.log('info', 'Wrote file into repository.', {
     path: targetPath,
@@ -339,11 +419,37 @@ async function executeSearchRepo(context: StepExecutionContext): Promise<StepExe
   const expression = new RegExp(query, 'i');
   const files: string[] = [];
 
-  await walkDirectory(repositoryRoot, repositoryRoot, files);
+  context.log('info', 'Enumerating repository files for search.', {
+    query,
+    includePattern,
+    repository: context.repository?.hostPath ?? context.config.repoMountSource
+  });
+
+  await walkDirectory(repositoryRoot, repositoryRoot, files, context.signal);
+
+  context.log('info', 'Prepared repository file list for search.', {
+    query,
+    includePattern,
+    repository: context.repository?.hostPath ?? context.config.repoMountSource,
+    fileCount: files.length
+  });
 
   const matches: Array<{ path: string; lineNumber: number; line: string }> = [];
+  const progressInterval = files.length > 2_000 ? 500 : files.length > 500 ? 200 : 100;
 
-  for (const relativePath of files) {
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+    throwIfAborted(context.signal);
+    const relativePath = files[fileIndex];
+
+    if (fileIndex > 0 && fileIndex % progressInterval === 0) {
+      context.log('info', 'Repository search still running.', {
+        filesScanned: fileIndex,
+        filesTotal: files.length,
+        matchCount: matches.length,
+        repository: context.repository?.hostPath ?? context.config.repoMountSource
+      });
+    }
+
     if (matcher && !matcher.test(relativePath)) {
       continue;
     }
@@ -358,6 +464,8 @@ async function executeSearchRepo(context: StepExecutionContext): Promise<StepExe
     const lines = content.split(/\r?\n/);
 
     for (let index = 0; index < lines.length; index += 1) {
+      throwIfAborted(context.signal);
+
       if (!expression.test(lines[index])) {
         continue;
       }
@@ -369,6 +477,11 @@ async function executeSearchRepo(context: StepExecutionContext): Promise<StepExe
       });
 
       if (matches.length >= 100) {
+        context.log('info', 'Reached repository search result cap.', {
+          filesScanned: fileIndex + 1,
+          filesTotal: files.length,
+          matchCount: matches.length
+        });
         break;
       }
     }
@@ -409,13 +522,20 @@ async function executeShellCommand(context: StepExecutionContext): Promise<StepE
     ? context.node.config.args.filter((value): value is string => typeof value === 'string')
     : [];
 
+  context.log('info', 'Starting shell command inside repository.', {
+    command: commandString ?? [command, ...args].join(' '),
+    repository: context.repository?.hostPath ?? context.config.repoMountSource
+  });
+
   const result = commandString
     ? await runProcess('sh', ['-lc', commandString], {
         cwd: repositoryRoot,
+        signal: context.signal,
         timeoutMs
       })
     : await runProcess(command!, args, {
         cwd: repositoryRoot,
+        signal: context.signal,
         timeoutMs
       });
 
@@ -436,11 +556,28 @@ async function executeShellCommand(context: StepExecutionContext): Promise<StepE
 
 async function executeGitSummary(context: StepExecutionContext): Promise<StepExecutionResult> {
   const repositoryRoot = resolveRepositoryRoot(context);
+  context.log('info', 'Collecting git summary for repository.', {
+    repository: context.repository?.hostPath ?? context.config.repoMountSource
+  });
+  throwIfAborted(context.signal);
   const [status, diffStat, lastCommit] = await Promise.all([
-    execFileAsync('git', ['-C', repositoryRoot, 'status', '--short']),
-    execFileAsync('git', ['-C', repositoryRoot, 'diff', '--stat', '--no-ext-diff']),
-    execFileAsync('git', ['-C', repositoryRoot, 'log', '-1', '--pretty=format:%h %s']).catch(() => ({ stdout: '' }))
+    runProcess('git', ['-C', repositoryRoot, 'status', '--short'], {
+      cwd: repositoryRoot,
+      signal: context.signal,
+      timeoutMs: 20_000
+    }),
+    runProcess('git', ['-C', repositoryRoot, 'diff', '--stat', '--no-ext-diff'], {
+      cwd: repositoryRoot,
+      signal: context.signal,
+      timeoutMs: 20_000
+    }),
+    runProcess('git', ['-C', repositoryRoot, 'log', '-1', '--pretty=format:%h %s'], {
+      cwd: repositoryRoot,
+      signal: context.signal,
+      timeoutMs: 20_000
+    }).catch(() => ({ exitCode: 0, stderr: '', stdout: '' }))
   ]);
+  throwIfAborted(context.signal);
 
   context.log('info', 'Collected git summary.', {
     repository: context.repository?.hostPath ?? context.config.repoMountSource,
@@ -471,11 +608,17 @@ async function executeHttpRequest(context: StepExecutionContext): Promise<StepEx
   const body = context.node.config.body;
   const headers = isRecord(context.node.config.headers) ? Object.fromEntries(Object.entries(context.node.config.headers).map(([key, value]) => [key, String(value)])) : undefined;
 
+  const timeoutMs = asNumber(context.node.config.timeoutMs) ?? context.task?.resourceDefaults.timeoutMs ?? 60_000;
+  context.log('info', 'Starting HTTP request.', {
+    method,
+    target: target.origin
+  });
+
   const response = await fetch(target, {
     method,
     headers,
     body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
-    signal: AbortSignal.timeout(asNumber(context.node.config.timeoutMs) ?? context.task?.resourceDefaults.timeoutMs ?? 60_000)
+    signal: createExecutionSignal(context.signal, timeoutMs)
   });
 
   const responseText = await response.text();
@@ -527,7 +670,7 @@ async function resolveOllamaModel(context: StepExecutionContext): Promise<string
 
   const baseUrl = assertNetworkAllowed(context.config, context.config.ollamaBaseUrl);
   const response = await fetch(new URL('/api/tags', baseUrl), {
-    signal: AbortSignal.timeout(5_000)
+    signal: createExecutionSignal(context.signal, 5_000)
   });
 
   if (!response.ok) {
@@ -548,6 +691,18 @@ async function executeAgent(context: StepExecutionContext): Promise<StepExecutio
   const baseUrl = assertNetworkAllowed(context.config, context.config.ollamaBaseUrl);
   const model = await resolveOllamaModel(context);
   const prompt = buildAgentPrompt(context);
+  const timeoutMs = asNumber(context.node.config.timeoutMs) ?? context.task?.resourceDefaults.timeoutMs ?? 180_000;
+
+  context.log('info', 'Preparing agent prompt for Ollama.', {
+    model,
+    workflow: context.workflow.name,
+    node: context.node.name
+  });
+
+  context.log('info', 'Sending agent request to Ollama.', {
+    model,
+    target: baseUrl.origin
+  });
 
   const response = await fetch(new URL('/api/generate', baseUrl), {
     method: 'POST',
@@ -559,7 +714,7 @@ async function executeAgent(context: StepExecutionContext): Promise<StepExecutio
       prompt,
       stream: false
     }),
-    signal: AbortSignal.timeout(asNumber(context.node.config.timeoutMs) ?? context.task?.resourceDefaults.timeoutMs ?? 180_000)
+    signal: createExecutionSignal(context.signal, timeoutMs)
   });
 
   if (!response.ok) {
@@ -586,6 +741,7 @@ async function executeAgent(context: StepExecutionContext): Promise<StepExecutio
 }
 
 async function executeJsonTransform(context: StepExecutionContext): Promise<StepExecutionResult> {
+  throwIfAborted(context.signal);
   const value = context.node.config.value;
   const merge = isRecord(context.node.config.merge) ? context.node.config.merge : null;
   const output = merge ? { ...context.input, ...merge } : value ?? context.input;
@@ -604,6 +760,7 @@ async function executeTemplate(context: StepExecutionContext): Promise<StepExecu
     throw new Error('Template requires config.template.');
   }
 
+  throwIfAborted(context.signal);
   const rendered = renderTemplate(template, {
     workflow: {
       id: context.workflow.id,
@@ -626,6 +783,7 @@ async function executeTemplate(context: StepExecutionContext): Promise<StepExecu
 }
 
 async function executeCondition(context: StepExecutionContext): Promise<StepExecutionResult> {
+  throwIfAborted(context.signal);
   const sourceNodeId = asString(context.node.config.sourceNodeId);
   const propertyPath = asString(context.node.config.path);
   const operator = asString(context.node.config.operator) ?? 'exists';
@@ -659,8 +817,13 @@ async function executeCondition(context: StepExecutionContext): Promise<StepExec
 }
 
 async function executeSelectRepository(context: StepExecutionContext): Promise<StepExecutionResult> {
+  throwIfAborted(context.signal);
   const repositoryId = asString(context.node.config.repositoryId);
   const repositoryPath = asString(context.node.config.path) ?? asString(context.node.config.repositoryPath);
+  context.log('info', 'Resolving repository context for downstream steps.', {
+    repositoryId,
+    repositoryPath: repositoryPath ?? null
+  });
   const repository = repositoryPath
     ? context.workflowStore.resolveAdHocRepository(repositoryPath)
     : repositoryId
@@ -688,6 +851,7 @@ async function executeSelectRepository(context: StepExecutionContext): Promise<S
 }
 
 async function executeApproval(context: StepExecutionContext): Promise<StepExecutionResult> {
+  throwIfAborted(context.signal);
   const prompt = asString(context.node.config.prompt) ?? 'Approval granted.';
 
   context.log('info', 'Approval node completed after manual approval.', {
@@ -763,6 +927,7 @@ export async function executeTaskNode(context: StepExecutionContext): Promise<St
         log: resolvedContext.log,
         node: resolvedContext.node,
         secretStore: resolvedContext.secretStore,
+        signal: resolvedContext.signal,
         timeoutMs: asNumber(resolvedContext.node.config.timeoutMs) ?? resolvedContext.task?.resourceDefaults.timeoutMs ?? 60_000,
         workflowStore: resolvedContext.workflowStore
       });
@@ -781,6 +946,7 @@ export async function executeTaskNode(context: StepExecutionContext): Promise<St
         config: resolvedContext.config,
         log: resolvedContext.log,
         node: resolvedContext.node,
+        signal: resolvedContext.signal,
         timeoutMs: asNumber(resolvedContext.node.config.timeoutMs) ?? resolvedContext.task?.resourceDefaults.timeoutMs ?? 180_000
       });
     default: {

@@ -2228,6 +2228,84 @@ code {
   justify-content: flex-end;
 }
 
+.workflow-editor__live-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.workflow-editor__live-panel--inspector .run-detail {
+  gap: 18px;
+}
+
+.workflow-editor__live-panel-header,
+.workflow-editor__live-panel-meta,
+.workflow-editor__live-log-item-top {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.workflow-editor__live-panel-header h4,
+.workflow-editor__live-panel-header p {
+  margin: 0;
+}
+
+.workflow-editor__live-panel-header p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.workflow-editor__live-panel-meta {
+  flex-wrap: wrap;
+}
+
+.workflow-editor__live-log-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-editor__live-log-item {
+  padding: 10px 12px;
+  border-left: 3px solid transparent;
+  border-radius: 12px;
+  background: rgba(250, 251, 250, 0.92);
+}
+
+.workflow-editor__live-log-item--info {
+  border-left-color: rgba(20, 100, 92, 0.36);
+}
+
+.workflow-editor__live-log-item--warn {
+  border-left-color: rgba(170, 107, 0, 0.42);
+}
+
+.workflow-editor__live-log-item--error {
+  border-left-color: rgba(180, 68, 35, 0.52);
+}
+
+.workflow-editor__live-log-item-top strong,
+.workflow-editor__live-log-item-top span {
+  display: block;
+}
+
+.workflow-editor__live-log-item-top span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.workflow-editor__live-log-data,
+.run-log-data {
+  margin: 8px 0 0;
+}
+
 .workflow-node-inspector__validation {
   display: grid;
   gap: 8px;
