@@ -1,81 +1,80 @@
-# flow-machine
+# Flow Machine: Local-First Workflow Automation for Developers
 
-Local-first workflow automation for developers.
+Flow Machine is a local-first workflow automation app for developers. It helps teams build repository-aware workflows with Ollama, MCP integrations, explicit approvals, and private local execution.
 
-The goal is to build a product in the same problem space as n8n, but optimized for local developer workflows, explicit privacy controls, MCP-first integrations, and low-cost model usage through Ollama.
-
-## Current Direction
-
-- Host-native Ollama is the default model runtime for v1.
-- The application itself runs locally in Podman.
-- Repositories are mounted from the host into the container for v1.
-- Workflows are stored in Git-friendly JSON and are exportable.
-- MCP support is a core part of the architecture.
-- Strict local-only mode blocks all outbound network access except localhost.
-- The onboarding target is one documented startup command after secrets and environment configuration.
-
-## Product Principles
-
-- Local-first execution with explicit privacy status.
-- Fast onboarding with minimal host setup.
-- Clear approvals for risky actions.
-- Strong developer visibility into logs, prompts, tool usage, and network activity.
-- Extensible task system for future custom workflows and shareable integrations.
-
-## Planned Onboarding
-
-1. Clone the repository.
-2. Copy `.env.example` to `.env` and adjust values if needed.
-3. Import secrets into the app when it first starts.
-4. Run one startup command.
-
-Target: less than 10 minutes for a developer who already has Podman and Ollama installed.
+Flow Machine runs locally in Podman, uses host-native Ollama by default, and keeps workflows exportable as Git-friendly JSON.
 
 ## Quick Start
 
+### Prerequisites
+
+- Node.js 22+
+- Corepack
+- Podman
+- Ollama running locally
+
+### Start the app
+
 ```bash
 cp .env.example .env
+corepack enable
+corepack yarn install
 corepack yarn local:up
 ```
 
-The `up` script builds the image and starts the local container directly with Podman. It does not require a separate compose provider.
+Open `http://127.0.0.1:3000`.
 
-If port `3000` is already taken on your machine, set `FLOW_MACHINE_PORT` in `.env` to a different value before starting.
+Recommended first-run steps:
 
-## Live Reload Development
+1. Open Settings and confirm Ollama is reachable.
+2. Pull or select a model.
+3. Add a local repository.
+4. Create or import a workflow.
 
-Use the host-side dev launcher when you want source changes to reload without rebuilding the Podman image.
+If port `3000` is already in use, change `FLOW_MACHINE_PORT` in `.env` before starting.
+
+## Local Development
+
+Use live reload when working on the web app or API:
 
 ```bash
 cp .env.example .env
+corepack enable
+corepack yarn install
 corepack yarn local:dev
 ```
 
-This starts:
+Development URLs:
 
-- package watchers for shared workspace builds,
-- the API in watch mode on `http://127.0.0.1:3000`,
-- the Vite dev server with HMR on `http://127.0.0.1:5173`.
+- Web: `http://127.0.0.1:5173`
+- API: `http://127.0.0.1:3000`
 
-Open the app on `http://127.0.0.1:5173` for live reload. The API keeps running on `3000` for the Vite proxy.
+`local:dev` starts the shared package watchers, the API in watch mode, and the Vite dev server with HMR.
 
-Use `Ctrl+C` to stop the live-reload stack. Keep `corepack yarn local:up` for the Podman-based production-like path.
+## Useful Commands
 
-## Monorepo Tooling
+- `corepack yarn local:up` starts the production-like local stack in Podman.
+- `corepack yarn local:down` stops the local container stack.
+- `corepack yarn local:logs` shows container logs.
+- `corepack yarn local:dev` starts live-reload development mode.
+- `corepack yarn typecheck` runs the workspace typechecks.
 
-- Yarn 4.13.0 is pinned in the repository.
-- `.yarnrc.yml` uses `injectEnvironmentFiles` so local Yarn commands automatically load `.env` and `.env.local` when present.
-- The default one-command startup flow is `corepack yarn local:up`, which wraps the repo-owned Podman launcher.
-- `corepack yarn local:dev` is the live-reload development path for UI and API work.
+## Environment
+
+The default setup lives in `.env.example`.
+
+- `FLOW_MACHINE_PORT`: app/API port for the local container path.
+- `FLOW_MACHINE_PRIVACY_MODE`: `local-first` or `strict-local`.
+- `FLOW_MACHINE_REPO_MOUNT`: repository root mounted into the app.
+- `FLOW_MACHINE_DATA_PATH`: local data directory.
+- `OLLAMA_BASE_URL`: Ollama endpoint used by the app.
+
+By default, app data is stored in `.flow-machine/data`.
+
+## Docs
+
+- [docs/project-plan.md](docs/project-plan.md)
 
 ## License
 
 Apache-2.0.
-
-## Planning Docs
-
-- [docs/project-plan.md](docs/project-plan.md)
-
-## Status
-
-Planning and architecture definition.
