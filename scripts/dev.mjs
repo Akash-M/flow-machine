@@ -8,6 +8,7 @@ const apiPort = process.env.FLOW_MACHINE_PORT ?? '3000';
 const webPort = process.env.FLOW_MACHINE_WEB_PORT ?? '5173';
 const workspaceRoot = projectRoot();
 const repoMount = resolveHostPath(process.env.FLOW_MACHINE_REPO_MOUNT, '.');
+const hostAccessMount = path.resolve(process.env.FLOW_MACHINE_HOST_ACCESS_MOUNT ?? path.parse(workspaceRoot).root);
 
 function normalizeOllamaBaseUrl(input) {
   const value = input ?? 'http://127.0.0.1:11434';
@@ -93,6 +94,8 @@ const env = {
   FLOW_MACHINE_WEB_DEV_URL: `http://127.0.0.1:${webPort}`,
   FLOW_MACHINE_REPO_ROOT: repoMount,
   FLOW_MACHINE_REPO_MOUNT_SOURCE: repoMount,
+  FLOW_MACHINE_HOST_ACCESS_ROOT: hostAccessMount,
+  FLOW_MACHINE_HOST_ACCESS_MOUNT_SOURCE: hostAccessMount,
   FLOW_MACHINE_DATA_DIR: dataPath,
   FLOW_MACHINE_DATA_PATH_SOURCE: process.env.FLOW_MACHINE_DATA_PATH ?? './.flow-machine/data',
   FLOW_MACHINE_MCP_CONFIG_PATH: mcpConfigPath,
@@ -140,7 +143,8 @@ createMcpConfigFile(mcpConfigPath);
 console.log('Starting Flow Machine live-reload mode');
 console.log(`  API: http://127.0.0.1:${apiPort}`);
 console.log(`  Web: http://127.0.0.1:${webPort}`);
-console.log(`  Repo root: ${repoMount}`);
+console.log(`  Workspace root: ${repoMount}`);
+console.log(`  Host access: ${hostAccessMount}`);
 console.log(`  Data dir: ${dataPath}`);
 console.log(`  Ollama: ${env.OLLAMA_BASE_URL}`);
 

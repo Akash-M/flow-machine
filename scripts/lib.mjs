@@ -33,6 +33,7 @@ export function commandEnv() {
 
 export function buildRunArgs() {
   const repoMount = resolveHostPath(process.env.FLOW_MACHINE_REPO_MOUNT, '.');
+  const hostAccessMount = resolveHostPath(process.env.FLOW_MACHINE_HOST_ACCESS_MOUNT, path.parse(projectRoot()).root);
   const dataPath = resolveHostPath(process.env.FLOW_MACHINE_DATA_PATH, './.flow-machine/data');
 
   ensureDirectory(dataPath);
@@ -42,6 +43,8 @@ export function buildRunArgs() {
     FLOW_MACHINE_PORT: '3000',
     FLOW_MACHINE_REPO_ROOT: '/workspace/host',
     FLOW_MACHINE_REPO_MOUNT_SOURCE: repoMount,
+    FLOW_MACHINE_HOST_ACCESS_ROOT: '/workspace/hostfs',
+    FLOW_MACHINE_HOST_ACCESS_MOUNT_SOURCE: hostAccessMount,
     FLOW_MACHINE_DATA_DIR: '/data',
     FLOW_MACHINE_DATA_PATH_SOURCE: process.env.FLOW_MACHINE_DATA_PATH ?? './.flow-machine/data',
     FLOW_MACHINE_MCP_CONFIG_PATH: '/data/mcp.json',
@@ -62,7 +65,9 @@ export function buildRunArgs() {
     '-v',
     `${dataPath}:/data`,
     '-v',
-    `${repoMount}:/workspace/host`
+    `${repoMount}:/workspace/host`,
+    '-v',
+    `${hostAccessMount}:/workspace/hostfs`
   ];
 
   for (const [key, value] of Object.entries(envEntries)) {

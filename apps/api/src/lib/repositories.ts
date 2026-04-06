@@ -28,7 +28,11 @@ export function ensurePathInsideRoot(rootPath: string, requestedPath: string): s
 }
 
 export function resolveRepositoryRuntimeRoot(config: AppConfig, repository: Pick<LocalRepository, 'relativePath'> | null): string {
-  return ensurePathInsideRoot(config.repoRoot, repository?.relativePath ?? '.');
+  if (!repository) {
+    return config.repoRoot;
+  }
+
+  return ensurePathInsideRoot(config.hostAccessRoot, repository.relativePath);
 }
 
 export function createRepositoryReference(
@@ -41,19 +45,22 @@ export function createRepositoryReference(
     updatedAt?: string;
   }
 ): LocalRepository {
-  const mountedHostRoot = path.resolve(config.repoMountSource);
-  const resolvedHostPath = path.resolve(options.hostPath);
-  const validatedHostPath = ensurePathInsideRoot(mountedHostRoot, resolvedHostPath);
+  const hostAccessRoot = path.resolve(config.hostAccessMountSource);
+  const workspaceHostRoot = path.resolve(config.repoMountSource);
+  const resolvedHostPath = path.isAbsolute(options.hostPath)
+    ? path.resolve(options.hostPath)
+    : path.resolve(workspaceHostRoot, options.hostPath);
+  const validatedHostPath = ensurePathInsideRoot(hostAccessRoot, resolvedHostPath);
 
   if (!fs.existsSync(validatedHostPath) || !fs.statSync(validatedHostPath).isDirectory()) {
-    throw new Error(`Repository path ${validatedHostPath} is not an accessible directory inside the mounted root.`);
+    throw new Error(`Repository path ${validatedHostPath} is not an accessible directory.`);
   }
 
   return {
     id: options.id,
     name: options.name?.trim() || path.basename(validatedHostPath) || 'Repository',
     hostPath: validatedHostPath,
-    relativePath: normalizeRelativePath(path.relative(mountedHostRoot, validatedHostPath)),
+    relativePath: normalizeRelativePath(path.relative(hostAccessRoot, validatedHostPath)),
     isGitRepository: fs.existsSync(path.join(validatedHostPath, '.git')),
     source: options.source,
     updatedAt: options.updatedAt ?? new Date().toISOString()
@@ -73,10 +80,11 @@ export function createMountedRootRepository(config: AppConfig): LocalRepository 
 }
 
 export function createAdHocRepository(config: AppConfig, inputPath: string): LocalRepository {
-  const mountedHostRoot = path.resolve(config.repoMountSource);
-  const hostPath = path.isAbsolute(inputPath) ? inputPath : path.resolve(mountedHostRoot, inputPath);
-  const resolvedHostPath = ensurePathInsideRoot(mountedHostRoot, hostPath);
-  const relativePath = normalizeRelativePath(path.relative(mountedHostRoot, resolvedHostPath));
+  const workspaceHostRoot = path.resolve(config.repoMountSource);
+  const hostAccessRoot = path.resolve(config.hostAccessMountSource);
+  const hostPath = path.isAbsolute(inputPath) ? inputPath : path.resolve(workspaceHostRoot, inputPath);
+  const resolvedHostPath = ensurePathInsideRoot(hostAccessRoot, hostPath);
+  const relativePath = normalizeRelativePath(path.relative(hostAccessRoot, resolvedHostPath));
 
   return createRepositoryReference(config, {
     hostPath: resolvedHostPath,

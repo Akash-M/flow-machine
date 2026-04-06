@@ -85,8 +85,9 @@ function buildPrivacySummary(config: AppConfig): string {
 }
 
 export async function buildAppStatus(config: AppConfig): Promise<AppStatus> {
-  const [repoRootExists, dataDirExists, mcpConfigExists, ollama, browserRuntime] = await Promise.all([
+  const [repoRootExists, hostAccessRootExists, dataDirExists, mcpConfigExists, ollama, browserRuntime] = await Promise.all([
     pathExists(config.repoRoot),
+    pathExists(config.hostAccessRoot),
     pathExists(config.dataDir),
     pathExists(config.mcpConfigPath),
     checkOllama(config.ollamaBaseUrl),
@@ -98,11 +99,20 @@ export async function buildAppStatus(config: AppConfig): Promise<AppStatus> {
   const preflight: PreflightCheck[] = [
     {
       id: 'repo-mount',
-      label: 'Repository mount',
+      label: 'Current workspace root',
       status: repoRootExists ? 'ready' : 'missing',
       detail: repoRootExists
-        ? `Mounted repository root is available at ${config.repoRoot}.`
-        : `The expected repository mount ${config.repoRoot} is not available inside the container.`,
+        ? `The default workspace root is available at ${config.repoRoot}.`
+        : `The expected workspace root ${config.repoRoot} is not available inside the runtime.`,
+      required: true
+    },
+    {
+      id: 'host-access-mount',
+      label: 'Host filesystem access',
+      status: hostAccessRootExists ? 'ready' : 'missing',
+      detail: hostAccessRootExists
+        ? `Registered repositories can resolve through ${config.hostAccessRoot}.`
+        : `The configured host filesystem access root ${config.hostAccessRoot} is not available inside the runtime.`,
       required: true
     },
     {
@@ -165,6 +175,12 @@ export async function buildAppStatus(config: AppConfig): Promise<AppStatus> {
       repoMount: {
         hostPath: config.repoMountSource,
         containerPath: config.repoRoot,
+        readOnly: false,
+        mode: 'mounted'
+      },
+      hostAccessMount: {
+        hostPath: config.hostAccessMountSource,
+        containerPath: config.hostAccessRoot,
         readOnly: false,
         mode: 'mounted'
       },

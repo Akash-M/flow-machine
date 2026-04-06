@@ -2,3 +2,9 @@ Create a workflow with the below tasks:
 task 1: user should be able to select a specific repository from their local machine
 task 2: model should scan the repo and generate a summary report about the repository
 task 3: show the summary to the user
+
+---
+
+Update the task with the below:
+
+- users should be able to pick a repository from their local machine with this. We should use a file picker for this

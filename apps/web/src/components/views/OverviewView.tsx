@@ -5,7 +5,7 @@ import { preflightTone } from '../../lib/dashboard';
 const startSteps = [
   {
     title: 'Confirm the local runtime',
-    description: 'Check the preflight panel to verify the repository mount, data directory, Ollama connectivity, and MCP config state.'
+    description: 'Check the preflight panel to verify the current workspace root, host filesystem access, data directory, Ollama connectivity, and MCP config state.'
   },
   {
     title: 'Open Workflows Catalog',
@@ -161,9 +161,15 @@ export function OverviewView({
               <dd>{status.runtime.containerRuntime}</dd>
             </div>
             <div>
-              <dt>Repository mount</dt>
+              <dt>Current workspace</dt>
               <dd>
                 <code>{status.runtime.repoMount.hostPath}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Host filesystem access</dt>
+              <dd>
+                <code>{status.runtime.hostAccessMount.hostPath}</code>
               </dd>
             </div>
             <div>

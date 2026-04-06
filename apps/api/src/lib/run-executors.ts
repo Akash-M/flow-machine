@@ -661,10 +661,10 @@ async function executeCondition(context: StepExecutionContext): Promise<StepExec
 async function executeSelectRepository(context: StepExecutionContext): Promise<StepExecutionResult> {
   const repositoryId = asString(context.node.config.repositoryId);
   const repositoryPath = asString(context.node.config.path) ?? asString(context.node.config.repositoryPath);
-  const repository = repositoryId
-    ? context.workflowStore.getRepository(repositoryId)
-    : repositoryPath
-      ? context.workflowStore.resolveAdHocRepository(repositoryPath)
+  const repository = repositoryPath
+    ? context.workflowStore.resolveAdHocRepository(repositoryPath)
+    : repositoryId
+      ? context.workflowStore.getRepository(repositoryId)
       : context.workflowStore.getRepository('mounted-root');
 
   if (!repository) {

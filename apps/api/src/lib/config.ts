@@ -6,6 +6,8 @@ export interface AppConfig {
   webDevUrl: string | null;
   repoRoot: string;
   repoMountSource: string;
+  hostAccessRoot: string;
+  hostAccessMountSource: string;
   dataDir: string;
   dataPathSource: string;
   mcpConfigPath: string;
@@ -32,6 +34,8 @@ export function loadConfig(): AppConfig {
     webDevUrl: process.env.FLOW_MACHINE_WEB_DEV_URL ?? null,
     repoRoot: process.env.FLOW_MACHINE_REPO_ROOT ?? '/workspace/host',
     repoMountSource: process.env.FLOW_MACHINE_REPO_MOUNT_SOURCE ?? '.',
+    hostAccessRoot: process.env.FLOW_MACHINE_HOST_ACCESS_ROOT ?? process.env.FLOW_MACHINE_REPO_ROOT ?? '/workspace/host',
+    hostAccessMountSource: process.env.FLOW_MACHINE_HOST_ACCESS_MOUNT_SOURCE ?? process.env.FLOW_MACHINE_REPO_MOUNT_SOURCE ?? '.',
     dataDir: process.env.FLOW_MACHINE_DATA_DIR ?? '/data',
     dataPathSource: process.env.FLOW_MACHINE_DATA_PATH_SOURCE ?? './.flow-machine/data',
     mcpConfigPath: process.env.FLOW_MACHINE_MCP_CONFIG_PATH ?? '/data/mcp.json',

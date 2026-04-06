@@ -5,6 +5,7 @@ import { WorkflowRunSummary } from '@flow-machine/shared-types';
 import { WorkflowStudioModel } from '../../hooks/useFlowMachineApp';
 import { PromptAttachmentDraft, toPromptAttachmentPayloads } from '../../lib/prompt-attachments';
 import { Combobox } from '../Combobox';
+import { OperationActivityPanel } from '../OperationActivityPanel';
 import { PromptComposer } from '../PromptComposer';
 import { StatusPill } from '../StatusPill';
 import { TaskDraftReviewCard } from '../TaskDraftReviewCard';
@@ -125,40 +126,6 @@ export function WorkflowCatalogView({ studio }: WorkflowCatalogViewProps) {
     }
   }
 
-  function renderWorkflowActivityPanel(title: string) {
-    return (
-      <section aria-live="polite" className="task-activity-panel">
-        <div className="task-activity-panel__header">
-          <h3>{title}</h3>
-          <span className={`task-activity-panel__status task-activity-panel__status--${studio.workflowActivity.status}`}>
-            {studio.workflowActivity.status === 'running'
-              ? 'Streaming'
-              : studio.workflowActivity.status === 'success'
-                ? 'Complete'
-                : studio.workflowActivity.status === 'error'
-                  ? 'Failed'
-                  : 'Idle'}
-          </span>
-        </div>
-
-        <ul className="task-activity-log">
-          {studio.workflowActivity.logs.map((entry) => (
-            <li className={`task-activity-log__item task-activity-log__item--${entry.level}`} key={entry.id}>
-              {entry.message}
-            </li>
-          ))}
-        </ul>
-
-        {studio.workflowActivity.liveOutput ? (
-          <div className="task-activity-stream">
-            <p className="subtle-copy">Live model output</p>
-            <pre className="json-preview json-preview--compact task-activity-stream__preview">{studio.workflowActivity.liveOutput}</pre>
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
   return (
     <section className="view-grid view-grid--catalog">
       <section className="panel feature-panel--wide">
@@ -207,7 +174,14 @@ export function WorkflowCatalogView({ studio }: WorkflowCatalogViewProps) {
           </label>
         </div>
 
-        {showGenerationActivity ? renderWorkflowActivityPanel('Workflow generation activity') : null}
+        {showGenerationActivity ? (
+          <OperationActivityPanel
+            liveOutput={studio.workflowActivity.liveOutput}
+            logs={studio.workflowActivity.logs}
+            status={studio.workflowActivity.status}
+            title="Workflow generation activity"
+          />
+        ) : null}
 
         {studio.workflowDraftProposal ? (
           <section className="draft-review-panel">
@@ -274,7 +248,14 @@ export function WorkflowCatalogView({ studio }: WorkflowCatalogViewProps) {
                 </button>
               </div>
 
-              {showDraftRefineActivity ? renderWorkflowActivityPanel('Workflow draft refinement activity') : null}
+              {showDraftRefineActivity ? (
+                <OperationActivityPanel
+                  liveOutput={studio.workflowActivity.liveOutput}
+                  logs={studio.workflowActivity.logs}
+                  status={studio.workflowActivity.status}
+                  title="Workflow draft refinement activity"
+                />
+              ) : null}
             </section>
 
             {studio.workflowDraftProposal.taskDrafts.length > 0 ? (

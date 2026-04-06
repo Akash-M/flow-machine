@@ -44,6 +44,11 @@ import {
   setStartNode,
   updateNodeInDefinition
 } from '../lib/workflow-editor';
+import {
+  WorkflowValidationIssue,
+  describeWorkflowValidationIssue,
+  validateWorkflowDefinition
+} from '../lib/workflow-node-validation';
 
 const initialCreateForm: WorkflowCreateForm = {
   name: '',
@@ -130,6 +135,7 @@ export interface CatalogViewModel {
 }
 
 export interface TaskActivityLogEntry {
+  createdAt: number;
   id: string;
   level: 'error' | 'info' | 'success';
   message: string;
@@ -219,6 +225,7 @@ function createTaskActivityLogEntry(level: TaskActivityLogEntry['level'], messag
   taskActivityLogSequence += 1;
 
   return {
+    createdAt: Date.now(),
     id: `task-activity-${taskActivityLogSequence}`,
     level,
     message
@@ -394,6 +401,7 @@ export interface WorkflowStudioModel {
   recentRuns: WorkflowRunSummary[];
   selectedNode: WorkflowNode | null;
   selectedNodeEdges: WorkflowEdge[];
+  selectedNodeValidationIssues: WorkflowValidationIssue[];
   selectedModelName: string | null;
   selectedModelSupportsImages: boolean | null;
   selectedNodeId: string | null;
@@ -407,6 +415,7 @@ export interface WorkflowStudioModel {
   workflowActivity: WorkflowOperationActivity;
   workflowDraftProposal: WorkflowDraftProposal | null;
   workflowRunCount: number;
+  workflowValidationIssues: WorkflowValidationIssue[];
   workflowTagsInput: string;
   workflows: WorkflowSummary[];
   handleAddEdge: () => void;
@@ -425,10 +434,12 @@ export interface WorkflowStudioModel {
   handleImportChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
   handleMoveNode: (nodeId: string, position: { x: number; y: number }) => void;
   handleNewNodeTaskKeyChange: (value: string) => void;
+  handleNodeConfigFieldChange: (field: string, value: string) => void;
   handleNodeConfigTextChange: (value: string) => void;
   handleNodeFieldChange: (field: 'name' | 'taskKey', value: string) => void;
   handleNodePositionChange: (axis: 'x' | 'y', value: string) => void;
   handleOpenRun: (runId: string) => void;
+  handleRepositoryPathChange: (repositoryPath: string) => void;
   handleRepositorySelectionChange: (repositoryId: string) => void;
   handleRejectRun: (runId: string) => void;
   handleRemoveEdge: (edgeId: string) => void;
@@ -1097,6 +1108,41 @@ export function useFlowMachineApp(): FlowMachineAppModel {
   const selectedNode = useMemo(
     () => editorWorkflow?.definition.nodes.find((node) => node.id === selectedNodeId) ?? null,
     [editorWorkflow, selectedNodeId]
+  );
+
+  const workflowForValidation = useMemo(() => {
+    if (!editorWorkflow) {
+      return null;
+    }
+
+    if (!selectedNode) {
+      return editorWorkflow;
+    }
+
+    try {
+      const parsed = JSON.parse(nodeConfigText) as unknown;
+
+      if (!isRecord(parsed)) {
+        return editorWorkflow;
+      }
+
+      return {
+        ...editorWorkflow,
+        definition: updateNodeInDefinition(editorWorkflow.definition, selectedNode.id, { config: parsed })
+      };
+    } catch {
+      return editorWorkflow;
+    }
+  }, [editorWorkflow, nodeConfigText, selectedNode]);
+
+  const workflowValidationIssues = useMemo(
+    () => (workflowForValidation ? validateWorkflowDefinition(workflowForValidation.definition, repositories) : []),
+    [repositories, workflowForValidation]
+  );
+
+  const selectedNodeValidationIssues = useMemo(
+    () => (selectedNodeId ? workflowValidationIssues.filter((issue) => issue.nodeId === selectedNodeId) : []),
+    [selectedNodeId, workflowValidationIssues]
   );
 
   const selectedNodeEdges = useMemo(() => {
@@ -1920,6 +1966,63 @@ export function useFlowMachineApp(): FlowMachineAppModel {
     setNodeConfigText(value);
   }
 
+  function handleNodeConfigFieldChange(field: string, value: string): void {
+    if (!selectedNodeId) {
+      return;
+    }
+
+    setEditorWorkflow((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const selectedNodeEntry = current.definition.nodes.find((node) => node.id === selectedNodeId);
+
+      if (!selectedNodeEntry) {
+        return current;
+      }
+
+      const nextConfig = { ...selectedNodeEntry.config } as Record<string, unknown>;
+
+      if (value.trim()) {
+        nextConfig[field] = value;
+      } else {
+        delete nextConfig[field];
+      }
+
+      return {
+        ...current,
+        definition: updateNodeInDefinition(current.definition, selectedNodeId, { config: nextConfig }),
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    setNodeConfigText((current) => {
+      try {
+        const parsed = JSON.parse(current) as unknown;
+
+        if (isRecord(parsed)) {
+          const nextConfig = { ...parsed } as Record<string, unknown>;
+
+          if (value.trim()) {
+            nextConfig[field] = value;
+          } else {
+            delete nextConfig[field];
+          }
+
+          return JSON.stringify(nextConfig, null, 2);
+        }
+      } catch {
+        // Fall back to rewriting from the selected node effect.
+      }
+
+      return current;
+    });
+
+    setConfigError(null);
+    setIsEditorDirty(true);
+  }
+
   function handleApplyNodeConfig(): void {
     if (!editorWorkflow || !selectedNode) {
       return;
@@ -2082,10 +2185,24 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       return;
     }
 
+    const focusValidationIssue = (issue: WorkflowValidationIssue, workflowName: string | null = null) => {
+      setSelectedNodeId(issue.nodeId);
+      setStudioView('canvas');
+      setFeedback(`${workflowName ? `${workflowName}: ` : ''}Cannot start this workflow. ${describeWorkflowValidationIssue(issue)}`);
+    };
+
     if (isEditorDirty) {
       const workflow = prepareWorkflowForSave();
 
       if (!workflow) {
+        return;
+      }
+
+      const issues = validateWorkflowDefinition(workflow.definition, repositories);
+
+      if (issues[0]) {
+        setEditorWorkflow(workflow);
+        focusValidationIssue(issues[0], workflow.name);
         return;
       }
 
@@ -2095,6 +2212,11 @@ export function useFlowMachineApp(): FlowMachineAppModel {
           startRunMutation.mutate(savedWorkflow.id);
         }
       });
+      return;
+    }
+
+    if (workflowValidationIssues[0] && editorWorkflow) {
+      focusValidationIssue(workflowValidationIssues[0], editorWorkflow.name);
       return;
     }
 
@@ -3051,7 +3173,9 @@ export function useFlowMachineApp(): FlowMachineAppModel {
         ...current,
         definition: updateNodeInDefinition(current.definition, selectedNodeId, {
           config: {
-            ...selectedNodeEntry.config,
+            ...Object.fromEntries(
+              Object.entries(selectedNodeEntry.config).filter(([key]) => key !== 'path' && key !== 'repositoryPath')
+            ),
             repositoryId
           }
         }),
@@ -3066,12 +3190,73 @@ export function useFlowMachineApp(): FlowMachineAppModel {
         if (isRecord(parsed)) {
           return JSON.stringify(
             {
-              ...parsed,
+              ...Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== 'path' && key !== 'repositoryPath')),
               repositoryId
             },
             null,
             2
           );
+        }
+      } catch {
+        // Fall back to rewriting from the selected node effect.
+      }
+
+      return current;
+    });
+
+    setConfigError(null);
+    setIsEditorDirty(true);
+  }
+
+  function handleRepositoryPathChange(repositoryPath: string): void {
+    if (!selectedNodeId) {
+      return;
+    }
+
+    const trimmedPath = repositoryPath.trim();
+
+    setEditorWorkflow((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const selectedNodeEntry = current.definition.nodes.find((node) => node.id === selectedNodeId);
+
+      if (!selectedNodeEntry) {
+        return current;
+      }
+
+      const nextConfig = Object.fromEntries(
+        Object.entries(selectedNodeEntry.config).filter(([key]) => key !== 'repositoryId' && key !== 'path' && key !== 'repositoryPath')
+      );
+
+      if (trimmedPath) {
+        nextConfig.repositoryPath = trimmedPath;
+      }
+
+      return {
+        ...current,
+        definition: updateNodeInDefinition(current.definition, selectedNodeId, {
+          config: nextConfig
+        }),
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    setNodeConfigText((current) => {
+      try {
+        const parsed = JSON.parse(current) as unknown;
+
+        if (isRecord(parsed)) {
+          const nextConfig = Object.fromEntries(
+            Object.entries(parsed).filter(([key]) => key !== 'repositoryId' && key !== 'path' && key !== 'repositoryPath')
+          ) as Record<string, unknown>;
+
+          if (trimmedPath) {
+            nextConfig.repositoryPath = trimmedPath;
+          }
+
+          return JSON.stringify(nextConfig, null, 2);
         }
       } catch {
         // Fall back to rewriting from the selected node effect.
@@ -3138,7 +3323,7 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       selectedRunId,
       selectedWorkflowName,
       waitingApprovalCount: pendingApprovalRuns.length,
-      canStartSelectedWorkflow: Boolean(selectedWorkflowId),
+      canStartSelectedWorkflow: Boolean(selectedWorkflowId) && workflowValidationIssues.length === 0,
       handleApproveSelectedRun,
       handleOpenRun,
       handleRejectSelectedRun,
@@ -3219,7 +3404,8 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       canAddEdge,
       canAddNode,
       canSaveWorkflow,
-      canStartWorkflow: Boolean(selectedWorkflowId) && Boolean(!editorWorkflow || editorWorkflow.definition.startNodeId),
+      canStartWorkflow:
+        Boolean(selectedWorkflowId) && Boolean(!editorWorkflow || editorWorkflow.definition.startNodeId) && workflowValidationIssues.length === 0,
       configError,
       createForm,
       createPending: createWorkflowMutation.isPending,
@@ -3254,6 +3440,7 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       recentRuns,
       selectedNode,
       selectedNodeEdges,
+      selectedNodeValidationIssues,
       selectedModelName,
       selectedModelSupportsImages,
       selectedNodeId,
@@ -3267,6 +3454,7 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       workflowActivity,
       workflowDraftProposal,
       workflowRunCount: workflowRuns.length,
+      workflowValidationIssues,
       workflowTagsInput,
       workflows,
       handleAddEdge,
@@ -3285,10 +3473,12 @@ export function useFlowMachineApp(): FlowMachineAppModel {
       handleImportChange,
       handleMoveNode,
       handleNewNodeTaskKeyChange,
+      handleNodeConfigFieldChange,
       handleNodeConfigTextChange,
       handleNodeFieldChange,
       handleNodePositionChange,
       handleOpenRun,
+      handleRepositoryPathChange,
       handleRepositorySelectionChange,
       handleRejectRun,
       handleRemoveEdge,

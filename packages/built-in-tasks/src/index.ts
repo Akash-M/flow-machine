@@ -12,7 +12,7 @@ const taskDefinitions = [
   defineTask({
     key: 'read-file',
     name: 'Read File',
-    description: 'Read files from the mounted host repository.',
+    description: 'Read files from the currently selected repository scope.',
     capabilities: ['filesystem:read'],
     requiresApprovalByDefault: false
   }),
@@ -26,7 +26,7 @@ const taskDefinitions = [
   defineTask({
     key: 'search-repo',
     name: 'Search Repository',
-    description: 'Search code and text across the mounted repository.',
+    description: 'Search code and text across the currently selected repository scope.',
     capabilities: ['filesystem:read'],
     requiresApprovalByDefault: false
   }),

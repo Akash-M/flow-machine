@@ -15,7 +15,8 @@ async function main(): Promise<void> {
       port: config.port,
       privacyMode: config.privacyMode,
       ollamaBaseUrl: config.ollamaBaseUrl,
-      repoRoot: config.repoRoot
+      repoRoot: config.repoRoot,
+      hostAccessRoot: config.hostAccessRoot
     },
     'Flow Machine API is ready.'
   );

@@ -6,6 +6,7 @@ import { WorkflowRunSummary } from '@flow-machine/shared-types';
 import { WorkflowStudioModel } from '../../hooks/useFlowMachineApp';
 import { PromptAttachmentDraft, toPromptAttachmentPayloads } from '../../lib/prompt-attachments';
 import { Combobox } from '../Combobox';
+import { OperationActivityPanel } from '../OperationActivityPanel';
 import { PromptComposer } from '../PromptComposer';
 import { StatusPill } from '../StatusPill';
 import { WorkflowCanvas } from '../WorkflowCanvas';
@@ -43,6 +44,10 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
     studio.activeRun?.steps.find((step) => step.state === 'waiting-approval' || step.approval.state === 'pending') ?? null;
   const runningStep = studio.activeRun?.steps.find((step) => step.state === 'running') ?? null;
   const failedStep = studio.activeRun?.steps.find((step) => step.state === 'failed') ?? null;
+  const failedNodeValidationIssue = failedStep
+    ? studio.workflowValidationIssues.find((issue) => issue.nodeId === failedStep.nodeId) ?? null
+    : null;
+  const primaryWorkflowValidationIssue = studio.workflowValidationIssues[0] ?? null;
   const approvalTargetLabel = waitingApprovalStep?.nodeName ?? 'pending step';
   const latestRunNodeName =
     studio.latestRun?.currentNodeId && editorWorkflow
@@ -153,40 +158,6 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
     } catch {
       return;
     }
-  }
-
-  function renderWorkflowActivityPanel(title: string) {
-    return (
-      <section aria-live="polite" className="task-activity-panel">
-        <div className="task-activity-panel__header">
-          <h3>{title}</h3>
-          <span className={`task-activity-panel__status task-activity-panel__status--${studio.workflowActivity.status}`}>
-            {studio.workflowActivity.status === 'running'
-              ? 'Streaming'
-              : studio.workflowActivity.status === 'success'
-                ? 'Complete'
-                : studio.workflowActivity.status === 'error'
-                  ? 'Failed'
-                  : 'Idle'}
-          </span>
-        </div>
-
-        <ul className="task-activity-log">
-          {studio.workflowActivity.logs.map((entry) => (
-            <li className={`task-activity-log__item task-activity-log__item--${entry.level}`} key={entry.id}>
-              {entry.message}
-            </li>
-          ))}
-        </ul>
-
-        {studio.workflowActivity.liveOutput ? (
-          <div className="task-activity-stream">
-            <p className="subtle-copy">Live model output</p>
-            <pre className="json-preview json-preview--compact task-activity-stream__preview">{studio.workflowActivity.liveOutput}</pre>
-          </div>
-        ) : null}
-      </section>
-    );
   }
 
   let executionTone: 'good' | 'warn' | 'bad' = editorWorkflow?.definition.startNodeId ? 'good' : 'warn';
@@ -346,7 +317,14 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
             </button>
           </div>
 
-          {showRefineActivity ? renderWorkflowActivityPanel('Workflow refinement activity') : null}
+          {showRefineActivity ? (
+            <OperationActivityPanel
+              liveOutput={studio.workflowActivity.liveOutput}
+              logs={studio.workflowActivity.logs}
+              status={studio.workflowActivity.status}
+              title="Workflow refinement activity"
+            />
+          ) : null}
         </section>
       </div>
 
@@ -454,15 +432,45 @@ export function WorkflowWorkbenchPanel({ studio }: WorkflowWorkbenchPanelProps) 
                 </div>
               ) : null}
 
+              {primaryWorkflowValidationIssue ? (
+                <div className="workflow-editor__context-panel workflow-editor__context-panel--validation">
+                  <div>
+                    <p className="metric-card__eyebrow">Run blocked</p>
+                    <h4>{primaryWorkflowValidationIssue.nodeName} needs configuration</h4>
+                    <p>
+                      {primaryWorkflowValidationIssue.message} {primaryWorkflowValidationIssue.recommendation}
+                      {studio.workflowValidationIssues.length > 1
+                        ? ` ${studio.workflowValidationIssues.length - 1} more issue${studio.workflowValidationIssues.length === 2 ? '' : 's'} still need attention.`
+                        : ''}
+                    </p>
+                  </div>
+
+                  <div className="workflow-editor__context-actions">
+                    <button className="button" onClick={() => studio.handleSelectNode(primaryWorkflowValidationIssue.nodeId)} type="button">
+                      Open blocking node
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {studio.latestRun?.status === 'failed' ? (
                 <div className="workflow-editor__context-panel workflow-editor__context-panel--failure">
                   <div>
                     <p className="metric-card__eyebrow">Latest failure</p>
                     <h4>{failedStep?.nodeName ?? 'A workflow step'} failed</h4>
-                    <p>{failedStep?.errorMessage ?? studio.latestRun.errorMessage ?? 'Resume the current run or start a clean rerun.'}</p>
+                    <p>
+                      {failedNodeValidationIssue
+                        ? `${failedNodeValidationIssue.message} ${failedNodeValidationIssue.recommendation}`
+                        : failedStep?.errorMessage ?? studio.latestRun.errorMessage ?? 'Resume the current run or start a clean rerun.'}
+                    </p>
                   </div>
 
                   <div className="workflow-editor__context-actions">
+                    {failedStep ? (
+                      <button className="button button--ghost" onClick={() => studio.handleSelectNode(failedStep.nodeId)} type="button">
+                        Open failed node
+                      </button>
+                    ) : null}
                     <button
                       className="button"
                       disabled={studio.isRunActionPending}

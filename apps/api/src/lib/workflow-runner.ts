@@ -15,6 +15,7 @@ import { AppConfig } from './config';
 import { buildApprovalPrompt, executeTaskNode, requiresApproval } from './run-executors';
 import { SecretStore } from './secret-store';
 import { WorkflowStore } from './workflow-store';
+import { getFirstWorkflowRunValidationError } from './workflow-run-validation';
 
 function buildLogEntryId(step: WorkflowStepRun, index: number): string {
   return `log-${step.nodeId}-${Date.now()}-${index}`;
@@ -184,6 +185,12 @@ export class WorkflowRunManager {
       throw new Error('Workflow not found.');
     }
 
+    const validationError = getFirstWorkflowRunValidationError(workflow, this.store);
+
+    if (validationError) {
+      throw new Error(validationError);
+    }
+
     const run = this.store.createRun(workflow);
     this.emitRun(run);
     void this.executeRun(run.id);
@@ -212,6 +219,12 @@ export class WorkflowRunManager {
 
     if (!workflow) {
       throw new Error('Workflow not found.');
+    }
+
+    const validationError = getFirstWorkflowRunValidationError(workflow, this.store);
+
+    if (validationError) {
+      throw new Error(validationError);
     }
 
     const preservedSteps = run.steps.filter((step) => step.state === 'success' || step.state === 'skipped');

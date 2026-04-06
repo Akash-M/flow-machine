@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { PromptAttachmentDraft, toPromptAttachmentPayloads } from '../../lib/prompt-attachments';
+import { OperationActivityPanel } from '../OperationActivityPanel';
 import { PromptComposer } from '../PromptComposer';
 import { StatusPill } from '../StatusPill';
 import { TaskDraftReviewCard } from '../TaskDraftReviewCard';
@@ -67,40 +68,6 @@ export function CatalogView({ catalog }: CatalogViewProps) {
   );
   const showGenerationActivity = taskActivity.action === 'generate' && (taskActivity.logs.length > 0 || taskActivity.liveOutput.length > 0);
   const showSelectedTaskActivity = Boolean(selectedTaskData) && taskActivity.action === 'refine' && taskActivity.targetTaskKey === selectedTaskData?.key;
-
-  function renderTaskActivityPanel(title: string) {
-    return (
-      <section aria-live="polite" className="task-activity-panel">
-        <div className="task-activity-panel__header">
-          <h3>{title}</h3>
-          <span className={`task-activity-panel__status task-activity-panel__status--${taskActivity.status}`}>
-            {taskActivity.status === 'running'
-              ? 'Streaming'
-              : taskActivity.status === 'success'
-                ? 'Complete'
-                : taskActivity.status === 'error'
-                  ? 'Failed'
-                  : 'Idle'}
-          </span>
-        </div>
-
-        <ul className="task-activity-log">
-          {taskActivity.logs.map((entry) => (
-            <li className={`task-activity-log__item task-activity-log__item--${entry.level}`} key={entry.id}>
-              {entry.message}
-            </li>
-          ))}
-        </ul>
-
-        {taskActivity.liveOutput ? (
-          <div className="task-activity-stream">
-            <p className="subtle-copy">Live model output</p>
-            <pre className="json-preview json-preview--compact task-activity-stream__preview">{taskActivity.liveOutput}</pre>
-          </div>
-        ) : null}
-      </section>
-    );
-  }
 
   useEffect(() => {
     if (selectedTask) {
@@ -234,6 +201,11 @@ export function CatalogView({ catalog }: CatalogViewProps) {
                     <section className="modal-section">
                       <h3>Edit With Natural Language</h3>
                       <p>Describe the change you want. The task key stays stable, and the catalog will save an override for this task.</p>
+                      {selectedTaskData.key === 'select-repository' ? (
+                        <p className="helper-copy">
+                          Refining this built-in task updates its saved definition, but the workflow editor still controls how repository selection is entered on each select-repository node.
+                        </p>
+                      ) : null}
                       <PromptComposer
                         attachments={taskEditAttachments}
                         helperCopy="Attach docs, screenshots, PDFs, or other files that should shape this task refinement."
@@ -259,7 +231,14 @@ export function CatalogView({ catalog }: CatalogViewProps) {
                         </button>
                       </div>
 
-                      {showSelectedTaskActivity ? renderTaskActivityPanel('Refinement activity') : null}
+                      {showSelectedTaskActivity ? (
+                        <OperationActivityPanel
+                          liveOutput={taskActivity.liveOutput}
+                          logs={taskActivity.logs}
+                          status={taskActivity.status}
+                          title="Refinement activity"
+                        />
+                      ) : null}
                     </section>
                   </div>
                 </div>
@@ -308,7 +287,14 @@ export function CatalogView({ catalog }: CatalogViewProps) {
           </button>
         </div>
 
-        {showGenerationActivity ? renderTaskActivityPanel('Generation activity') : null}
+        {showGenerationActivity ? (
+          <OperationActivityPanel
+            liveOutput={taskActivity.liveOutput}
+            logs={taskActivity.logs}
+            status={taskActivity.status}
+            title="Generation activity"
+          />
+        ) : null}
 
         {generatedTaskDraft ? (
           <TaskDraftReviewCard

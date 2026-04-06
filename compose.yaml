@@ -10,6 +10,8 @@ services:
       FLOW_MACHINE_PORT: 3000
       FLOW_MACHINE_REPO_ROOT: /workspace/host
       FLOW_MACHINE_REPO_MOUNT_SOURCE: ${FLOW_MACHINE_REPO_MOUNT:-.}
+      FLOW_MACHINE_HOST_ACCESS_ROOT: /workspace/hostfs
+      FLOW_MACHINE_HOST_ACCESS_MOUNT_SOURCE: ${FLOW_MACHINE_HOST_ACCESS_MOUNT:-/}
       FLOW_MACHINE_DATA_DIR: /data
       FLOW_MACHINE_DATA_PATH_SOURCE: ${FLOW_MACHINE_DATA_PATH:-./.flow-machine/data}
       FLOW_MACHINE_MCP_CONFIG_PATH: /data/mcp.json
@@ -26,3 +28,6 @@ services:
       - type: bind
         source: ${FLOW_MACHINE_REPO_MOUNT:-.}
         target: /workspace/host
+      - type: bind
+        source: ${FLOW_MACHINE_HOST_ACCESS_MOUNT:-/}
+        target: /workspace/hostfs

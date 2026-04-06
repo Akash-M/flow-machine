@@ -123,6 +123,7 @@ export interface AppStatus {
     containerRuntime: 'podman';
     nodeVersion: string;
     repoMount: RepoMount;
+    hostAccessMount: RepoMount;
     dataDir: string;
     mcpConfigPath: string;
     hostNativeOllama: boolean;

@@ -312,7 +312,8 @@ export class WorkflowStore {
 
   listRepositories(): LocalRepository[] {
     const mountedRoot = createMountedRootRepository(this.config);
-    const storedRepositories = this.getStoredRepositories().filter((repository) => repository.relativePath !== '.');
+    const workspaceRoot = path.resolve(this.config.repoMountSource);
+    const storedRepositories = this.getStoredRepositories().filter((repository) => repository.hostPath !== workspaceRoot);
 
     return [mountedRoot, ...storedRepositories];
   }
@@ -323,6 +324,7 @@ export class WorkflowStore {
 
   upsertRepository(input: { name: string; path: string }): LocalRepository {
     const currentRepositories = this.getStoredRepositories();
+    const workspaceRoot = path.resolve(this.config.repoMountSource);
     const nextRepository = createRepositoryReference(this.config, {
       hostPath: input.path,
       id: `repo-${randomUUID().slice(0, 8)}`,
@@ -338,8 +340,8 @@ export class WorkflowStore {
         }
       : nextRepository;
 
-    if (repository.relativePath === '.') {
-      throw new Error('The mounted root is already available by default and does not need to be registered again.');
+    if (repository.hostPath === workspaceRoot) {
+      throw new Error('The current workspace is already available by default and does not need to be registered again.');
     }
 
     const nextRepositories = [
@@ -725,7 +727,7 @@ export class WorkflowStore {
           accumulator.push(repository);
         }
       } catch {
-        // Skip repositories that no longer resolve inside the mounted root.
+        // Skip repositories that are no longer accessible on the host.
       }
 
       return accumulator;

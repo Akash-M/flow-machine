@@ -18,6 +18,15 @@ export function WorkflowNodeInspector({ studio }: WorkflowNodeInspectorProps) {
 
   const { editorWorkflow, selectedNode } = studio;
   const selectedRepositoryId = typeof selectedNode.config.repositoryId === 'string' ? selectedNode.config.repositoryId : 'mounted-root';
+  const selectedRepositoryPath =
+    typeof selectedNode.config.repositoryPath === 'string'
+      ? selectedNode.config.repositoryPath
+      : typeof selectedNode.config.path === 'string'
+        ? selectedNode.config.path
+        : '';
+  const searchQuery = typeof selectedNode.config.query === 'string' ? selectedNode.config.query : '';
+  const searchIncludePattern = typeof selectedNode.config.includePattern === 'string' ? selectedNode.config.includePattern : '';
+  const repositorySelectionMode = selectedRepositoryPath.trim().length > 0 ? 'path' : 'registered';
   const taskOptions = studio.tasks.map((task) => ({
     value: task.key,
     label: task.name,
@@ -26,13 +35,23 @@ export function WorkflowNodeInspector({ studio }: WorkflowNodeInspectorProps) {
   }));
   const repositoryOptions =
     studio.repositories.length === 0
-      ? [{ value: 'mounted-root', label: 'Mounted root', description: 'Repository list is still loading' }]
+      ? [{ value: 'mounted-root', label: 'Current workspace', description: 'Repository list is still loading' }]
       : studio.repositories.map((repository) => ({
           value: repository.id,
           label: repository.name,
-          description: repository.relativePath,
+          description: repository.source === 'mounted-root' ? 'Current workspace' : repository.hostPath,
           keywords: [repository.hostPath]
         }));
+  const selectedRegisteredRepository = studio.repositories.find((repository) => repository.id === selectedRepositoryId) ?? null;
+
+  function handleRepositorySelectionModeChange(mode: 'path' | 'registered'): void {
+    if (mode === 'registered') {
+      studio.handleRepositoryPathChange('');
+      return;
+    }
+
+    studio.handleRepositoryPathChange(selectedRegisteredRepository?.hostPath ?? '');
+  }
 
   function resolveNodeName(nodeId: string): string {
     return editorWorkflow.definition.nodes.find((node) => node.id === nodeId)?.name ?? nodeId;
@@ -73,15 +92,90 @@ export function WorkflowNodeInspector({ studio }: WorkflowNodeInspectorProps) {
       {selectedNode.taskKey === 'select-repository' ? (
         <div className="form-field">
           <label htmlFor="selected-node-repository">Repository</label>
-          <Combobox
-            id="selected-node-repository"
-            noResultsText="No repositories match this search."
-            onChange={studio.handleRepositorySelectionChange}
-            options={repositoryOptions}
-            placeholder="Search repositories"
-            value={selectedRepositoryId}
-          />
-          <p className="helper-copy">Downstream repository-aware tasks will use this selected repository as their working root.</p>
+          <div className="segmented-control" role="tablist" aria-label="Repository selection mode">
+            <button
+              aria-selected={repositorySelectionMode === 'registered'}
+              className={`segmented-control__button${repositorySelectionMode === 'registered' ? ' segmented-control__button--active' : ''}`}
+              onClick={() => handleRepositorySelectionModeChange('registered')}
+              role="tab"
+              type="button"
+            >
+              Saved repository
+            </button>
+            <button
+              aria-selected={repositorySelectionMode === 'path'}
+              className={`segmented-control__button${repositorySelectionMode === 'path' ? ' segmented-control__button--active' : ''}`}
+              onClick={() => handleRepositorySelectionModeChange('path')}
+              role="tab"
+              type="button"
+            >
+              Direct path
+            </button>
+          </div>
+
+          {repositorySelectionMode === 'registered' ? (
+            <>
+              <Combobox
+                id="selected-node-repository"
+                noResultsText="No repositories match this search."
+                onChange={studio.handleRepositorySelectionChange}
+                options={repositoryOptions}
+                placeholder="Search repositories"
+                value={selectedRepositoryId}
+              />
+              <p className="helper-copy">Use a saved repository from Settings. Downstream repository-aware tasks will use that repository as their working root.</p>
+            </>
+          ) : (
+            <>
+              <input
+                className="input"
+                id="selected-node-repository"
+                onChange={(event) => studio.handleRepositoryPathChange(event.target.value)}
+                placeholder="/Users/you/projects/another-repo"
+                value={selectedRepositoryPath}
+              />
+              <p className="helper-copy">Enter a direct host path when you want this workflow node to target a repository that is not saved in the registry.</p>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {selectedNode.taskKey === 'search-repo' ? (
+        <>
+          <div className="form-field">
+            <label htmlFor="selected-node-search-query">Search query</label>
+            <input
+              className="input"
+              id="selected-node-search-query"
+              onChange={(event) => studio.handleNodeConfigFieldChange('query', event.target.value)}
+              placeholder="TODO|FIXME|function useFlowMachineApp"
+              value={searchQuery}
+            />
+            <p className="helper-copy">Required. This is the text or regex pattern the Search Repository node will look for.</p>
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="selected-node-search-include-pattern">Include pattern</label>
+            <input
+              className="input"
+              id="selected-node-search-include-pattern"
+              onChange={(event) => studio.handleNodeConfigFieldChange('includePattern', event.target.value)}
+              placeholder="src/**/*.ts"
+              value={searchIncludePattern}
+            />
+            <p className="helper-copy">Optional. Limit the search to matching files or folders.</p>
+          </div>
+        </>
+      ) : null}
+
+      {studio.selectedNodeValidationIssues.length > 0 ? (
+        <div className="workflow-node-inspector__validation">
+          <p className="error-copy">Fix these issues before the workflow can run:</p>
+          <ul className="workflow-node-inspector__validation-list">
+            {studio.selectedNodeValidationIssues.map((issue) => (
+              <li key={`${issue.nodeId}:${issue.field ?? issue.message}`}>{`${issue.message} ${issue.recommendation}`}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

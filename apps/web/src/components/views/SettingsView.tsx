@@ -2,6 +2,7 @@ import { AppStatus } from '@flow-machine/shared-types';
 
 import { SettingsViewModel } from '../../hooks/useFlowMachineApp';
 import { preflightTone, privacyTone } from '../../lib/dashboard';
+import { OperationActivityPanel } from '../OperationActivityPanel';
 import { StatusPill } from '../StatusPill';
 
 interface SettingsViewProps {
@@ -43,8 +44,12 @@ export function SettingsView({ settings, status }: SettingsViewProps) {
                 <td>{status.runtime.containerRuntime}</td>
               </tr>
               <tr>
-                <th scope="row">Repository mount</th>
+                <th scope="row">Current workspace</th>
                 <td className="settings-table__mono">{status.runtime.repoMount.hostPath}</td>
+              </tr>
+              <tr>
+                <th scope="row">Host filesystem access</th>
+                <td className="settings-table__mono">{status.runtime.hostAccessMount.hostPath}</td>
               </tr>
               <tr>
                 <th scope="row">Data directory</th>
@@ -140,35 +145,13 @@ export function SettingsView({ settings, status }: SettingsViewProps) {
           </div>
 
           {settings.modelPullActivity.status !== 'idle' || settings.modelPullActivity.logs.length > 0 ? (
-            <section aria-live="polite" className="task-activity-panel">
-              <div className="task-activity-panel__header">
-                <h3>Model pull activity</h3>
-                <span className={`task-activity-panel__status task-activity-panel__status--${settings.modelPullActivity.status}`}>
-                  {settings.modelPullActivity.status === 'running'
-                    ? 'Streaming'
-                    : settings.modelPullActivity.status === 'success'
-                      ? 'Complete'
-                      : settings.modelPullActivity.status === 'error'
-                        ? 'Failed'
-                        : 'Idle'}
-                </span>
-              </div>
-
-              <ul className="task-activity-log">
-                {settings.modelPullActivity.logs.map((entry) => (
-                  <li className={`task-activity-log__item task-activity-log__item--${entry.level}`} key={entry.id}>
-                    {entry.message}
-                  </li>
-                ))}
-              </ul>
-
-              {settings.modelPullActivity.liveOutput ? (
-                <div className="task-activity-stream">
-                  <p className="subtle-copy">Latest pull progress</p>
-                  <pre className="json-preview json-preview--compact task-activity-stream__preview">{settings.modelPullActivity.liveOutput}</pre>
-                </div>
-              ) : null}
-            </section>
+            <OperationActivityPanel
+              liveOutput={settings.modelPullActivity.liveOutput}
+              liveOutputLabel="Latest pull progress"
+              logs={settings.modelPullActivity.logs}
+              status={settings.modelPullActivity.status}
+              title="Model pull activity"
+            />
           ) : null}
 
           {settings.errorMessage ? <p className="error-copy">{settings.errorMessage}</p> : null}
@@ -231,7 +214,7 @@ export function SettingsView({ settings, status }: SettingsViewProps) {
       <section className="panel feature-panel--wide">
         <div className="panel__header">
           <h2>Repository registry</h2>
-          <p>Register repositories that live inside the mounted root so workflows can select them later with the Select Repository task.</p>
+          <p>Register repositories from anywhere on the host filesystem so workflows can select them later with the Select Repository task.</p>
         </div>
 
         <div className="form-grid">
@@ -251,9 +234,10 @@ export function SettingsView({ settings, status }: SettingsViewProps) {
               className="input"
               id="repository-path"
               onChange={(event) => settings.setRepositoryPathInput(event.target.value)}
-              placeholder={status.runtime.repoMount.hostPath}
+              placeholder="/Users/you/projects/my-repo"
               value={settings.repositoryPathInput}
             />
+            <p className="helper-copy">Absolute paths outside the current workspace are supported as long as they are reachable through host filesystem access.</p>
           </div>
         </div>
 

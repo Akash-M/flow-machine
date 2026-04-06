@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { WorkflowStudioModel } from '../../hooks/useFlowMachineApp';
+import { OperationActivityPanel } from '../OperationActivityPanel';
 import { StatusPill } from '../StatusPill';
 
 interface WorkflowLibraryPanelProps {
@@ -20,40 +21,6 @@ export function WorkflowLibraryPanel({ studio }: WorkflowLibraryPanelProps) {
     } catch {
       return;
     }
-  }
-
-  function renderWorkflowActivityPanel(title: string) {
-    return (
-      <section aria-live="polite" className="task-activity-panel">
-        <div className="task-activity-panel__header">
-          <h3>{title}</h3>
-          <span className={`task-activity-panel__status task-activity-panel__status--${studio.workflowActivity.status}`}>
-            {studio.workflowActivity.status === 'running'
-              ? 'Streaming'
-              : studio.workflowActivity.status === 'success'
-                ? 'Complete'
-                : studio.workflowActivity.status === 'error'
-                  ? 'Failed'
-                  : 'Idle'}
-          </span>
-        </div>
-
-        <ul className="task-activity-log">
-          {studio.workflowActivity.logs.map((entry) => (
-            <li className={`task-activity-log__item task-activity-log__item--${entry.level}`} key={entry.id}>
-              {entry.message}
-            </li>
-          ))}
-        </ul>
-
-        {studio.workflowActivity.liveOutput ? (
-          <div className="task-activity-stream">
-            <p className="subtle-copy">Live model output</p>
-            <pre className="json-preview json-preview--compact task-activity-stream__preview">{studio.workflowActivity.liveOutput}</pre>
-          </div>
-        ) : null}
-      </section>
-    );
   }
 
   return (
@@ -122,7 +89,14 @@ export function WorkflowLibraryPanel({ studio }: WorkflowLibraryPanelProps) {
                 </button>
               </div>
 
-              {showGenerationActivity ? renderWorkflowActivityPanel('Workflow generation activity') : null}
+              {showGenerationActivity ? (
+                <OperationActivityPanel
+                  liveOutput={studio.workflowActivity.liveOutput}
+                  logs={studio.workflowActivity.logs}
+                  status={studio.workflowActivity.status}
+                  title="Workflow generation activity"
+                />
+              ) : null}
             </section>
 
             <form className="workflow-library__composer form-grid form-grid--single" onSubmit={studio.handleCreateSubmit}>

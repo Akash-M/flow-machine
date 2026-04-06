@@ -4,6 +4,7 @@ import { PromptAttachmentPayload, TaskDraft } from '@flow-machine/shared-types';
 
 import { TaskOperationActivity } from '../hooks/useFlowMachineApp';
 import { PromptAttachmentDraft, toPromptAttachmentPayloads } from '../lib/prompt-attachments';
+import { OperationActivityPanel } from './OperationActivityPanel';
 import { PromptComposer } from './PromptComposer';
 import { StatusPill } from './StatusPill';
 
@@ -67,44 +68,6 @@ export function TaskDraftReviewCard({
     } catch {
       return;
     }
-  }
-
-  function renderActivityPanel(): JSX.Element | null {
-    if (!activity || !showActivity) {
-      return null;
-    }
-
-    return (
-      <section aria-live="polite" className="task-activity-panel">
-        <div className="task-activity-panel__header">
-          <h3>Task draft activity</h3>
-          <span className={`task-activity-panel__status task-activity-panel__status--${activity.status}`}>
-            {activity.status === 'running'
-              ? 'Streaming'
-              : activity.status === 'success'
-                ? 'Complete'
-                : activity.status === 'error'
-                  ? 'Failed'
-                  : 'Idle'}
-          </span>
-        </div>
-
-        <ul className="task-activity-log">
-          {activity.logs.map((entry) => (
-            <li className={`task-activity-log__item task-activity-log__item--${entry.level}`} key={entry.id}>
-              {entry.message}
-            </li>
-          ))}
-        </ul>
-
-        {activity.liveOutput ? (
-          <div className="task-activity-stream">
-            <p className="subtle-copy">Live model output</p>
-            <pre className="json-preview json-preview--compact task-activity-stream__preview">{activity.liveOutput}</pre>
-          </div>
-        ) : null}
-      </section>
-    );
   }
 
   return (
@@ -203,7 +166,14 @@ export function TaskDraftReviewCard({
             ) : null}
           </div>
 
-          {renderActivityPanel()}
+          {activity && showActivity ? (
+            <OperationActivityPanel
+              liveOutput={activity.liveOutput}
+              logs={activity.logs}
+              status={activity.status}
+              title="Task draft activity"
+            />
+          ) : null}
         </section>
       </div>
     </section>
