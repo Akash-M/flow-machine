@@ -1,0 +1,27 @@
+{
+  "name": "flow-machine",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "Local-first workflow automation for developers.",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "yarn workspaces foreach -A -t run build",
+    "dev:api": "yarn workspace @flow-machine/api dev",
+    "dev:web": "yarn workspace @flow-machine/web dev",
+    "start": "yarn workspace @flow-machine/api start",
+    "typecheck": "yarn workspaces foreach -A -t run build && yarn workspaces foreach -A -t run typecheck",
+    "validate:lifecycle": "node ./scripts/validate-run-lifecycle.mjs",
+    "local:dev": "node ./scripts/dev.mjs",
+    "local:up": "node ./scripts/up.mjs",
+    "local:down": "node ./scripts/down.mjs",
+    "local:logs": "node ./scripts/logs.mjs"
+  }
+}

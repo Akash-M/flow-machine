@@ -164,9 +164,10 @@ The onboarding experience is a product requirement, not just a documentation pre
 ### Target User Flow
 
 1. Clone the repository.
-2. Configure environment variables and import secrets if needed.
+2. Copy `.env.example` to `.env` and adjust values if needed.
 3. Run one documented startup command.
-4. Open the UI and complete any first-run checks.
+4. Open the UI and import secrets if needed.
+5. Complete any first-run checks.
 
 ### V1 Onboarding Standard
 
@@ -176,7 +177,8 @@ The onboarding experience is a product requirement, not just a documentation pre
 
 ### Planned Startup Command
 
-- The project should converge on a single documented startup command such as podman compose up --build.
+- The project should converge on a single documented startup command such as corepack yarn local:up.
+- Internally this should use a repo-owned launcher so startup does not depend on a separate Podman compose provider being installed.
 - If that proves too rigid for cross-platform quality, a repo-provided launcher can replace it later, but the user-facing experience should still be one command.
 
 ## Privacy And Network Modes
@@ -418,6 +420,18 @@ Model management should exist as a system feature and may later also be exposed 
 - Single Podman-hosted app container for v1.
 - Host-native Ollama by default.
 - Mounted volumes for app data and configuration.
+
+### Workspace Tooling
+
+- Yarn 4.13.0 workspaces pinned in-repo.
+- `injectEnvironmentFiles` for `.env` and `.env.local` support in local commands.
+- `node-modules` linker to keep tool compatibility straightforward in the container and on host machines.
+
+## Licensing Recommendation
+
+- Recommended license: Apache-2.0.
+- Rationale: it preserves broad adoption and commercial friendliness, includes an explicit patent grant, and is a better fit than strong copyleft for a developer tool that aims to spread quickly.
+- If preventing hosted commercial forks later becomes more important than adoption, reevaluate before first public launch; changing license after outside contributions is materially harder.
 
 ## Suggested Repository Structure
 

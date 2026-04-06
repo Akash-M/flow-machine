@@ -1,0 +1,28 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: container/Containerfile
+    image: flow-machine:dev
+    container_name: flow-machine
+    environment:
+      FLOW_MACHINE_HOST: 0.0.0.0
+      FLOW_MACHINE_PORT: 3000
+      FLOW_MACHINE_REPO_ROOT: /workspace/host
+      FLOW_MACHINE_REPO_MOUNT_SOURCE: ${FLOW_MACHINE_REPO_MOUNT:-.}
+      FLOW_MACHINE_DATA_DIR: /data
+      FLOW_MACHINE_DATA_PATH_SOURCE: ${FLOW_MACHINE_DATA_PATH:-./.flow-machine/data}
+      FLOW_MACHINE_MCP_CONFIG_PATH: /data/mcp.json
+      FLOW_MACHINE_PRIVACY_MODE: ${FLOW_MACHINE_PRIVACY_MODE:-local-first}
+      FLOW_MACHINE_START_COMMAND: corepack yarn local:up
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.containers.internal:11434}
+    ports:
+      - ${FLOW_MACHINE_PORT:-3000}:3000
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ${FLOW_MACHINE_DATA_PATH:-./.flow-machine/data}
+        target: /data
+      - type: bind
+        source: ${FLOW_MACHINE_REPO_MOUNT:-.}
+        target: /workspace/host

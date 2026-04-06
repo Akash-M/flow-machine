@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "validation": {
+      "args": [
+        "ready"
+      ],
+      "command": "echo"
+    }
+  }
+}

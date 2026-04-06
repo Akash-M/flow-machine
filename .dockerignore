@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.git/
+.env
+.env.local
+.flow-machine/data/
+.flow-machine/docker-config/
+.tmp-docker-config/
+apps/**/dist/
+packages/**/dist/
+.yarn/*
+!.yarn/releases/
+!.yarn/releases/**

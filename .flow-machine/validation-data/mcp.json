@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "validation": {
+      "args": [
+        "apps/api/dist/lib/mcp-validation-server.js"
+      ],
+      "command": "node",
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
